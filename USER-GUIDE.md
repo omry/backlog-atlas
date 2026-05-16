@@ -62,6 +62,10 @@ This writes:
 Local install requires a clean Git or Sapling working tree. It stages/adds the
 two files and prints the commit and push commands to run next.
 
+Use `--force` to install into a dirty working tree. This skips the cleanliness
+check and rewrites/re-adds the managed install files, but Backlog Atlas still
+only stages/adds its own install files.
+
 `--target-root` is for local installs only. Do not combine it with `--repo`.
 The checkout's Git or Sapling remote must point at GitHub so Backlog Atlas can
 detect the target repository.

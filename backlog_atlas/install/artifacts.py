@@ -62,8 +62,8 @@ def build_install_metadata(install_source: InstallSource) -> str:
     return json.dumps(metadata, indent=2, sort_keys=True) + "\n"
 
 
-def write_text_artifact(path: Path, content: str) -> bool:
-    if path.exists() and path.read_text(encoding="utf-8") == content:
+def write_text_artifact(path: Path, content: str, force: bool = False) -> bool:
+    if not force and path.exists() and path.read_text(encoding="utf-8") == content:
         return False
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
@@ -79,7 +79,7 @@ def is_managed_workflow(content: str) -> bool:
 
 
 def write_install_artifacts(
-    target_root: Path, install_source: InstallSource
+    target_root: Path, install_source: InstallSource, force: bool = False
 ) -> InstallArtifactResult:
     wf_path = find_workflow_target(target_root)
     metadata_path = find_install_metadata_target(target_root)
@@ -89,17 +89,17 @@ def write_install_artifacts(
     if wf_path.exists():
         current_workflow = wf_path.read_text(encoding="utf-8")
         workflow_matches = current_workflow == workflow_content
-        if not workflow_matches and is_managed_workflow(current_workflow):
-            if write_text_artifact(wf_path, workflow_content):
+        if force or (not workflow_matches and is_managed_workflow(current_workflow)):
+            if write_text_artifact(wf_path, workflow_content, force=force):
                 changed_paths.append(wf_path)
             workflow_matches = True
     else:
         workflow_matches = True
-        if write_text_artifact(wf_path, workflow_content):
+        if write_text_artifact(wf_path, workflow_content, force=force):
             changed_paths.append(wf_path)
 
     if workflow_matches and write_text_artifact(
-        metadata_path, build_install_metadata(install_source)
+        metadata_path, build_install_metadata(install_source), force=force
     ):
         changed_paths.append(metadata_path)
     return InstallArtifactResult(

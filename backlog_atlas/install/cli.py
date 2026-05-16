@@ -14,6 +14,13 @@ def run_install(args: argparse.Namespace) -> int:
             "--repo and --target-root are mutually exclusive for install; "
             "use --repo for remote install or --target-root for local checkout install"
         )
+    if args.repo and args.force:
+        raise UserError(
+            "--force only applies to local installs; remote installs do not "
+            "inspect the working tree"
+        )
+    if args.delivery and not args.repo:
+        raise UserError("--delivery only applies to remote installs with --repo")
 
     install_source = sources.resolve_install_source(
         args.install_from, dry_run=args.dry_run
@@ -24,15 +31,16 @@ def run_install(args: argparse.Namespace) -> int:
             repo_name, install_source, args.delivery or "pr", dry_run=args.dry_run
         )
 
-    if args.delivery:
-        raise UserError("--delivery only applies to remote installs with --repo")
-
     target_root = (
         Path(args.target_root) if args.target_root else repo.detect_target_root()
     )
     repo_name = repo.resolve_repo(None, target_root)
     return local.run_local_install(
-        repo_name, target_root, install_source, dry_run=args.dry_run
+        repo_name,
+        target_root,
+        install_source,
+        dry_run=args.dry_run,
+        force=args.force,
     )
 
 
@@ -122,6 +130,11 @@ def add_install_args(parser: argparse.ArgumentParser) -> None:
         "--dry-run",
         action="store_true",
         help="Print what install would do without writing files or calling GitHub.",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="For local installs, proceed even when the target working tree is dirty.",
     )
 
 

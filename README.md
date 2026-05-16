@@ -48,10 +48,17 @@ full local and remote install flows.
 ## CLI
 
 ```sh
+# install the workflow and metadata in a repository
 backlog-atlas install [flags]
-backlog-atlas update [flags]
+
+# remove the installed workflow and metadata
 backlog-atlas uninstall [flags]
+
+# write the static web UI files for preview or packaging
 backlog-atlas dump-web --output PATH
+
+# refresh backlog data; normally run by the installed GitHub Action
+backlog-atlas update [flags]
 ```
 
 ## License

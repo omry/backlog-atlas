@@ -82,13 +82,19 @@ def print_local_install_plan(
     target_root: Path,
     install_source: InstallSource,
     vcs: str,
+    force: bool = False,
 ) -> None:
     print("Dry run: would install Backlog Atlas locally")
     print("No files would be written and no GitHub calls would be made.")
     print(f"Target repo: {repo_name}")
     print(f"Target working tree: {target_root}")
     print(f"Workflow would install Backlog Atlas from: {install_source.pip_spec}")
-    print("Would require a clean working tree.")
+    if force:
+        print(
+            "Would skip the clean working tree requirement because --force was provided."
+        )
+    else:
+        print("Would require a clean working tree.")
     if install_source.bundled_wheel_path:
         action = (
             "Would build and upload bundled wheel"
@@ -108,16 +114,22 @@ def run_local_install(
     target_root: Path,
     install_source: InstallSource,
     dry_run: bool = False,
+    force: bool = False,
 ) -> int:
     vcs = repo.detect_local_vcs(target_root)
     if dry_run:
-        print_local_install_plan(repo_name, target_root, install_source, vcs)
+        print_local_install_plan(
+            repo_name, target_root, install_source, vcs, force=force
+        )
         return 0
 
-    print(f"Checking working tree at {target_root}")
-    if ensure_worktree_clean(target_root, vcs) is False:
-        return 1
-    print("Working tree is clean")
+    if force:
+        print(f"Skipping working tree cleanliness check for {target_root} (--force)")
+    else:
+        print(f"Checking working tree at {target_root}")
+        if ensure_worktree_clean(target_root, vcs) is False:
+            return 1
+        print("Working tree is clean")
     github.ensure_backlog_branch_with_bundle(repo_name, install_source)
 
     print(f"Target repo: {repo_name}")
@@ -125,7 +137,7 @@ def run_local_install(
     print(f"Workflow will install Backlog Atlas from: {install_source.pip_spec}")
     print(f"Resolved install: {describe_install_source(install_source)}")
 
-    result = artifacts.write_install_artifacts(target_root, install_source)
+    result = artifacts.write_install_artifacts(target_root, install_source, force=force)
     print("Checked install workflow and metadata")
     if result.changed_paths:
         if result.workflow_path in result.changed_paths:
