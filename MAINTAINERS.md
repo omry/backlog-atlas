@@ -65,6 +65,23 @@ python -m pytest
 The full suite currently collects the same test file, but keep running both
 commands so the habit stays correct as the repo grows.
 
+## GitHub CLI Mocking in Tests
+
+Unit tests should not require a live `gh` login. Code that talks to GitHub goes
+through `backlog_atlas.install.commands.run_gh()` or the core helpers that call
+it. Tests monkeypatch those narrow command wrappers and return small JSON
+payloads that match the GitHub API fields the code reads.
+
+For install-path tests, prefer monkeypatching module-level helpers such as
+`install_github.run_gh`, `install_sources.run_command`, or
+`install_sources.try_command` instead of patching `subprocess` directly. This
+keeps tests focused on Backlog Atlas behavior and avoids coupling assertions to
+shell details.
+
+When a test covers a missing repo, missing write access, or a failed local
+command, raise the same user-facing `UserError` that the wrapper would raise.
+That keeps CLI error handling covered without making the test execute `gh`.
+
 ## Linting and Formatting
 
 The committed tool config lives in `pyproject.toml`.

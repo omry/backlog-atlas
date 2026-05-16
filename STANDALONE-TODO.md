@@ -33,7 +33,7 @@ project.
 ## Tests
 
 - [ ] Verify tests from a fresh clone / clean checkout.
-- [ ] Document the `gh`-CLI mocking strategy used in tests.
+- [x] Document the `gh`-CLI mocking strategy used in tests.
 
 ## Docs
 
