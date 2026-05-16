@@ -47,9 +47,11 @@ project.
 
 ## Publication
 
-- [ ] Confirm PyPI project availability/ownership for `backlog-atlas`.
-- [ ] Confirm PyPI Trusted Publisher is configured for repository
+- [x] Confirm PyPI project availability/ownership for `backlog-atlas`.
+- [x] Confirm PyPI Trusted Publisher is configured for repository
   `omry/backlog-atlas`, workflow `publish.yml`, environment `pypi`.
+- [ ] Make release a single-step process, with the GitHub Action running the
+  required CI checks before publishing.
 
 ## Cleanup
 
