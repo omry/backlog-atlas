@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.scripts]
-backlog-atlas = "backlog_atlas:main"
+backlog-atlas = "backlog_atlas.core:main"
 
 [tool.setuptools.packages.find]
 include = ["backlog_atlas*"]

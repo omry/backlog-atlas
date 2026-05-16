@@ -26,12 +26,20 @@ pip install .
 # pip install backlog-atlas
 ```
 
+Backlog Atlas shells out to the GitHub CLI for local GitHub reads. Install and
+authenticate `gh` before running `backlog-atlas update` locally:
+
+```
+gh auth login
+gh auth status
+```
+
 ## CLI
 
 ```
 backlog-atlas update [flags]        # regenerate outputs from current GitHub state
-backlog-atlas install [flags]       # set up backlog-atlas branch + workflow YAML in a target repo
-backlog-atlas uninstall [flags]     # reverse install
+backlog-atlas install [flags]       # write the Backlog Atlas workflow YAML
+backlog-atlas uninstall [flags]     # write a one-shot uninstall workflow
 backlog-atlas dump-web --output X   # write the bundled index.html (or full web/ dir)
 ```
 
@@ -49,14 +57,21 @@ Defaults write everything under `<target-repo>/.backlog-atlas/` so the file syst
 ### `install`
 
 ```
-backlog-atlas install --repo owner/name [--pip-spec <pip arg>]
+backlog-atlas install [--install-from <backlog-atlas==X.Y.Z-or-local-checkout>]
+backlog-atlas install --repo <owner/name-or-github-url> [--delivery pr|push]
 ```
 
-Creates the `backlog-atlas` branch via the GitHub API (if missing) and drops `.github/workflows/update-backlog-atlas.yml` into the target repo. The generated workflow does `pip install <pip-spec>` and runs `backlog-atlas update` + `backlog-atlas dump-web`. Default `--pip-spec` is `backlog-atlas` (PyPI). Override with a git URL or local path until publication.
+Inside a local Sapling or Git checkout, `install` requires a clean target working tree, writes `.github/workflows/update-backlog-atlas.yml` plus `.github/backlog-atlas.json` install metadata, adds/stages both files, and prints commit/push commands. With `--repo` and no local target, it installs remotely through `gh`; remote installs default to `--delivery pr`, or use `--delivery push` to write to the default branch directly. The generated workflow creates the `backlog-atlas` branch on its first run, installs Backlog Atlas, and runs `backlog-atlas update` + `backlog-atlas dump-web`. By default, the workflow installs the current Backlog Atlas package version from PyPI, pinned as `backlog-atlas==X.Y.Z`. Use `--install-from /path/to/backlog-atlas-checkout` for pre-publish testing; the checkout is built into a wheel, uploaded to the target repo's `backlog-atlas` branch, and installed from there. That development install path requires `gh` and write access to the target repo.
 
 ### `uninstall`
 
-Removes the workflow YAML and (with confirmation) deletes the `backlog-atlas` branch.
+Writes a one-shot workflow to `.github/workflows/update-backlog-atlas.yml`. After you commit and push it, GitHub Actions logs that Backlog Atlas was uninstalled, keeps the `backlog-atlas` branch by default, and removes the workflow and install metadata from `main`.
+
+Use `--delete-branch` to make the one-shot workflow delete the `backlog-atlas` branch too:
+
+```
+backlog-atlas uninstall --repo owner/name --delete-branch
+```
 
 ## Web UI
 
@@ -110,7 +125,8 @@ MIT.
 │   ├── templates/
 │   │   ├── backlog.md.tmpl
 │   │   ├── backlog_updates_entry.md.tmpl
-│   │   └── workflow.yml.tmpl   # GitHub Actions workflow template installed by `install`
+│   │   ├── workflow.yml.tmpl   # GitHub Actions workflow template installed by `install`
+│   │   └── uninstall_workflow.yml.tmpl
 │   └── web/
 │       └── index.html          # bundled static UI
 └── tests/

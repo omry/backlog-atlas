@@ -1,0 +1,45 @@
+name: Uninstall Backlog Atlas
+
+on:
+  push:
+    paths:
+      - .github/workflows/update-backlog-atlas.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  BACKLOG_ATLAS_BRANCH: __BACKLOG_ATLAS_BRANCH__
+  BACKLOG_ATLAS_DELETE_BRANCH: "__BACKLOG_ATLAS_DELETE_BRANCH__"
+
+jobs:
+  uninstall:
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+      - name: Delete Backlog Atlas branch
+        if: env.BACKLOG_ATLAS_DELETE_BRANCH == 'true'
+        run: |
+          if git ls-remote --exit-code --heads origin "$BACKLOG_ATLAS_BRANCH" >/dev/null 2>&1; then
+            git push origin --delete "$BACKLOG_ATLAS_BRANCH"
+            echo "::notice title=Backlog Atlas uninstalled::Deleted $BACKLOG_ATLAS_BRANCH branch."
+          else
+            echo "::notice title=Backlog Atlas uninstalled::$BACKLOG_ATLAS_BRANCH branch was already absent."
+          fi
+      - name: Log retained Backlog Atlas branch
+        if: env.BACKLOG_ATLAS_DELETE_BRANCH != 'true'
+        run: |
+          echo "::notice title=Backlog Atlas uninstalled::Workflow hook removed; retained $BACKLOG_ATLAS_BRANCH branch and generated artifacts."
+      - name: Remove uninstall workflow
+        run: |
+          git rm --ignore-unmatch .github/backlog-atlas.json .github/workflows/update-backlog-atlas.yml
+          git commit -m "backlog: uninstall workflow [skip ci]"
+          git push

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -10,7 +11,12 @@ from unittest.mock import patch
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import backlog_atlas as ub  # noqa: E402
+import backlog_atlas.core as ub  # noqa: E402
+import backlog_atlas.install as inst  # noqa: E402
+from backlog_atlas.install import github as install_github  # noqa: E402
+from backlog_atlas.install import local as install_local  # noqa: E402
+from backlog_atlas.install import repo as install_repo  # noqa: E402
+from backlog_atlas.install import sources as install_sources  # noqa: E402
 
 # Helpers derived from _DEFAULT_CATEGORIES for tests
 _L2C = {label: cat for cat, c in ub._DEFAULT_CATEGORIES.items() for label in c.labels}
@@ -549,7 +555,36 @@ def test_dry_run_does_not_bootstrap_updates_jsonl(
 # ---------------------------------------------------------------------------
 
 
-def test_workflow_template_substitutes_pip_spec():
+def _stub_local_install(monkeypatch: pytest.MonkeyPatch) -> list[tuple[Any, ...]]:
+    calls: list[tuple[Any, ...]] = []
+
+    def fake_clean(target_root: Path, vcs: str) -> None:
+        calls.append(("clean", target_root, vcs))
+
+    def fake_add(target_root: Path, artifact_paths: list[Path], vcs: str) -> None:
+        calls.append(("add", target_root, artifact_paths, vcs))
+
+    monkeypatch.setattr(install_repo, "detect_local_vcs", lambda target_root: "git")
+    monkeypatch.setattr(install_local, "ensure_worktree_clean", fake_clean)
+    monkeypatch.setattr(install_local, "add_local_install_files", fake_add)
+    monkeypatch.setattr(
+        install_repo, "is_on_default_branch", lambda target_root, vcs: None
+    )
+    monkeypatch.setattr(install_sources, "installed_version", lambda: "1.2.3")
+    return calls
+
+
+def _make_backlog_atlas_checkout(tmp_path: Path) -> Path:
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    (source_root / "pyproject.toml").write_text(
+        "[project]\nname = 'backlog-atlas'\nversion = '2.3.4'\n",
+        encoding="utf-8",
+    )
+    return source_root
+
+
+def test_workflow_template_substitutes_install_source():
     out = ub.load_workflow_template("git+https://example.com/x.git")
     assert "__BACKLOG_ATLAS_PIP__" not in out
     assert "BACKLOG_ATLAS_PIP: git+https://example.com/x.git" in out
@@ -557,10 +592,16 @@ def test_workflow_template_substitutes_pip_spec():
     assert 'pip install "$BACKLOG_ATLAS_PIP"' in out
     assert "backlog-atlas update" in out
     assert "backlog-atlas dump-web" in out
+    assert "ensure-backlog-branch:" in out
+    assert "needs: ensure-backlog-branch" in out
+    assert 'git push "$remote_url" HEAD:"$BACKLOG_ATLAS_BRANCH"' in out
     assert "ref: ${{ env.BACKLOG_ATLAS_BRANCH }}" in out
+    assert "ref: ${{ github.event.repository.default_branch }}" in out
+    assert "ref: main" not in out
     assert 'origin "$BACKLOG_ATLAS_BRANCH"' in out
     assert "backlog-atlas-branch" in out
-    assert "backlog-branch" not in out
+    assert "path: backlog-branch" not in out
+    assert "cd backlog-branch" not in out
     assert "origin backlog\n" not in out
     # GitHub Actions ${{ }} expressions must be preserved verbatim.
     assert "${{ github.event_name }}" in out
@@ -570,8 +611,7 @@ def test_workflow_template_substitutes_pip_spec():
 def test_install_writes_workflow_when_missing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    monkeypatch.setattr(ub, "gh_branch_exists", lambda repo, branch: True)
-    monkeypatch.setattr(ub, "resolve_repo", lambda r: "o/r")
+    calls = _stub_local_install(monkeypatch)
     sys.argv = [
         "backlog-atlas",
         "install",
@@ -579,38 +619,37 @@ def test_install_writes_workflow_when_missing(
         "o/r",
         "--target-root",
         str(tmp_path),
-        "--skip-branch",
-        "--pip-spec",
-        "git+https://example.com/x.git",
+        "--install-from",
+        "backlog-atlas==2.0.0",
     ]
     rc = ub.main()
     assert rc == 0
     wf = tmp_path / ".github" / "workflows" / "update-backlog-atlas.yml"
+    metadata = tmp_path / ".github" / "backlog-atlas.json"
     assert wf.exists()
+    assert metadata.exists()
     content = wf.read_text(encoding="utf-8")
-    assert "BACKLOG_ATLAS_PIP: git+https://example.com/x.git" in content
+    assert "BACKLOG_ATLAS_PIP: backlog-atlas==2.0.0" in content
     assert "${{ github.event_name }}" in content
+    metadata_obj = json.loads(metadata.read_text(encoding="utf-8"))
+    assert metadata_obj == {
+        "schema_version": 1,
+        "tool": "backlog-atlas",
+        "installed_version": "2.0.0",
+        "install_source": "backlog-atlas==2.0.0",
+        "source_type": "pypi",
+        "workflow_path": ".github/workflows/update-backlog-atlas.yml",
+    }
+    assert calls == [
+        ("clean", tmp_path, "git"),
+        ("add", tmp_path, [wf, metadata], "git"),
+    ]
 
 
-def test_install_creates_backlog_atlas_branch(
+def test_install_defaults_to_pypi_package(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    created: dict[str, Any] = {}
-
-    monkeypatch.setattr(ub, "gh_branch_exists", lambda repo, branch: False)
-    monkeypatch.setattr(ub, "resolve_repo", lambda r: "o/r")
-
-    def fake_create_branch(repo: str, branch: str, seed_path: str, content: str):
-        created.update(
-            {
-                "repo": repo,
-                "branch": branch,
-                "seed_path": seed_path,
-                "content": content,
-            }
-        )
-
-    monkeypatch.setattr(ub, "gh_create_orphan_branch", fake_create_branch)
+    _stub_local_install(monkeypatch)
     sys.argv = [
         "backlog-atlas",
         "install",
@@ -618,23 +657,26 @@ def test_install_creates_backlog_atlas_branch(
         "o/r",
         "--target-root",
         str(tmp_path),
-        "--skip-workflow",
     ]
     rc = ub.main()
     assert rc == 0
-    assert created["repo"] == "o/r"
-    assert created["branch"] == "backlog-atlas"
-    assert created["seed_path"] == "BACKLOG.md"
+    wf = tmp_path / ".github" / "workflows" / "update-backlog-atlas.yml"
+    metadata = tmp_path / ".github" / "backlog-atlas.json"
+    assert "BACKLOG_ATLAS_PIP: backlog-atlas==1.2.3" in wf.read_text(encoding="utf-8")
+    metadata_obj = json.loads(metadata.read_text(encoding="utf-8"))
+    assert metadata_obj["install_source"] == "backlog-atlas==1.2.3"
+    assert metadata_obj["installed_version"] == "1.2.3"
+    assert metadata_obj["source_type"] == "pypi"
 
 
-def test_install_idempotent_when_workflow_exists(
+def test_install_leaves_unmatched_existing_workflow_and_metadata_unchanged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     wf = tmp_path / ".github" / "workflows" / "update-backlog-atlas.yml"
+    metadata = tmp_path / ".github" / "backlog-atlas.json"
     wf.parent.mkdir(parents=True)
     wf.write_text("# preexisting\n", encoding="utf-8")
-    monkeypatch.setattr(ub, "gh_branch_exists", lambda repo, branch: True)
-    monkeypatch.setattr(ub, "resolve_repo", lambda r: "o/r")
+    calls = _stub_local_install(monkeypatch)
     sys.argv = [
         "backlog-atlas",
         "install",
@@ -642,47 +684,446 @@ def test_install_idempotent_when_workflow_exists(
         "o/r",
         "--target-root",
         str(tmp_path),
-        "--skip-branch",
     ]
     rc = ub.main()
     assert rc == 0
     # Existing workflow not overwritten
     assert wf.read_text(encoding="utf-8") == "# preexisting\n"
+    assert not metadata.exists()
+    assert calls == [("clean", tmp_path, "git")]
 
 
-def test_uninstall_deletes_backlog_atlas_branch(
+def test_install_writes_metadata_when_existing_workflow_matches(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    deleted: dict[str, str] = {}
-
-    monkeypatch.setattr(ub, "gh_branch_exists", lambda repo, branch: True)
-    monkeypatch.setattr(ub, "resolve_repo", lambda r: "o/r")
-
-    def fake_delete_branch(repo: str, branch: str):
-        deleted["repo"] = repo
-        deleted["branch"] = branch
-
-    monkeypatch.setattr(ub, "gh_delete_branch", fake_delete_branch)
+    wf = tmp_path / ".github" / "workflows" / "update-backlog-atlas.yml"
+    metadata = tmp_path / ".github" / "backlog-atlas.json"
+    wf.parent.mkdir(parents=True)
+    wf.write_text(ub.load_workflow_template("backlog-atlas==1.2.3"), encoding="utf-8")
+    calls = _stub_local_install(monkeypatch)
     sys.argv = [
         "backlog-atlas",
-        "uninstall",
+        "install",
         "--repo",
         "o/r",
         "--target-root",
         str(tmp_path),
-        "--keep-workflow",
-        "--yes",
     ]
     rc = ub.main()
     assert rc == 0
-    assert deleted == {"repo": "o/r", "branch": "backlog-atlas"}
+    assert metadata.exists()
+    assert calls == [("clean", tmp_path, "git"), ("add", tmp_path, [metadata], "git")]
 
 
-def test_uninstall_removes_workflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_install_updates_managed_existing_workflow_and_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    wf = tmp_path / ".github" / "workflows" / "update-backlog-atlas.yml"
+    metadata = tmp_path / ".github" / "backlog-atlas.json"
+    wf.parent.mkdir(parents=True)
+    old_workflow = ub.load_workflow_template("backlog-atlas==1.2.3").replace(
+        "ref: ${{ github.event.repository.default_branch }}", "ref: main"
+    )
+    wf.write_text(old_workflow, encoding="utf-8")
+    calls = _stub_local_install(monkeypatch)
+    sys.argv = [
+        "backlog-atlas",
+        "install",
+        "--repo",
+        "o/r",
+        "--target-root",
+        str(tmp_path),
+    ]
+    rc = ub.main()
+    assert rc == 0
+    assert "ref: main" not in wf.read_text(encoding="utf-8")
+    assert metadata.exists()
+    assert calls == [
+        ("clean", tmp_path, "git"),
+        ("add", tmp_path, [wf, metadata], "git"),
+    ]
+
+
+def test_install_local_checkout_detects_repo_and_adds_workflow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    calls = _stub_local_install(monkeypatch)
+    monkeypatch.setattr(install_repo, "detect_target_root", lambda: tmp_path)
+    monkeypatch.setattr(install_repo, "detect_repo_from_sl", lambda cwd=None: "o/r")
+    monkeypatch.setattr(install_repo, "detect_repo_from_git", lambda cwd=None: None)
+    sys.argv = ["backlog-atlas", "install"]
+    rc = ub.main()
+    assert rc == 0
+    wf = tmp_path / ".github" / "workflows" / "update-backlog-atlas.yml"
+    metadata = tmp_path / ".github" / "backlog-atlas.json"
+    assert wf.exists()
+    assert metadata.exists()
+    assert calls == [
+        ("clean", tmp_path, "git"),
+        ("add", tmp_path, [wf, metadata], "git"),
+    ]
+
+
+def test_install_local_checkout_rejects_delivery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    _stub_local_install(monkeypatch)
+    sys.argv = [
+        "backlog-atlas",
+        "install",
+        "--repo",
+        "o/r",
+        "--target-root",
+        str(tmp_path),
+        "--delivery",
+        "push",
+    ]
+    with pytest.raises(RuntimeError, match="--delivery only applies to remote"):
+        ub.main()
+
+
+def test_resolve_install_source_from_local_checkout_builds_bundled_wheel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    source_root = _make_backlog_atlas_checkout(tmp_path)
+    monkeypatch.setattr(
+        install_sources,
+        "build_local_wheel",
+        lambda path: ("backlog_atlas-2.3.4-py3-none-any.whl", b"wheel bytes"),
+    )
+
+    source = inst.resolve_install_source(str(source_root))
+
+    assert source == inst.InstallSource(
+        pip_spec=(
+            "backlog-atlas-branch/.backlog-atlas/packages/"
+            "backlog_atlas-2.3.4-py3-none-any.whl"
+        ),
+        version="2.3.4",
+        source_type="bundled-wheel",
+        bundled_wheel_path=".backlog-atlas/packages/backlog_atlas-2.3.4-py3-none-any.whl",
+        bundled_wheel_content=b"wheel bytes",
+    )
+
+
+def test_install_rejects_floating_install_source():
+    with pytest.raises(RuntimeError, match="must be a pinned PyPI spec"):
+        inst.resolve_install_source("git+https://example.com/x.git@main")
+
+
+def test_install_local_target_bundles_local_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    calls = _stub_local_install(monkeypatch)
+    source_root = _make_backlog_atlas_checkout(tmp_path)
+    target_root = tmp_path / "target"
+    bundle_calls: list[tuple[str, inst.InstallSource]] = []
+    monkeypatch.setattr(
+        install_sources,
+        "build_local_wheel",
+        lambda path: ("backlog_atlas-2.3.4-py3-none-any.whl", b"wheel bytes"),
+    )
+    monkeypatch.setattr(
+        install_github,
+        "ensure_backlog_branch_with_bundle",
+        lambda repo, source: bundle_calls.append((repo, source)),
+    )
+    sys.argv = [
+        "backlog-atlas",
+        "install",
+        "--repo",
+        "o/r",
+        "--target-root",
+        str(target_root),
+        "--install-from",
+        str(source_root),
+    ]
+    rc = ub.main()
+    assert rc == 0
+    assert bundle_calls[0][0] == "o/r"
+    install_source = bundle_calls[0][1]
+    assert install_source.source_type == "bundled-wheel"
+    assert install_source.bundled_wheel_content == b"wheel bytes"
+    wf = target_root / ".github" / "workflows" / "update-backlog-atlas.yml"
+    metadata = target_root / ".github" / "backlog-atlas.json"
+    assert calls == [
+        ("clean", target_root, "git"),
+        ("add", target_root, [wf, metadata], "git"),
+    ]
+
+
+def test_install_local_checkout_guides_default_branch_push(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    _stub_local_install(monkeypatch)
+    monkeypatch.setattr(
+        install_repo, "is_on_default_branch", lambda target_root, vcs: True
+    )
+    sys.argv = [
+        "backlog-atlas",
+        "install",
+        "--repo",
+        "o/r",
+        "--target-root",
+        str(tmp_path),
+    ]
+    rc = ub.main()
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert 'git commit -m "backlog: install Backlog Atlas workflow"' in out
+    assert "git push" in out
+    assert "git push -u origin HEAD" not in out
+    assert "the install commit will be on the default branch" in out
+    assert "after it lands on the default branch" in out
+
+
+def test_install_local_checkout_guides_pr_from_non_default_branch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    _stub_local_install(monkeypatch)
+    monkeypatch.setattr(
+        install_repo, "is_on_default_branch", lambda target_root, vcs: False
+    )
+    sys.argv = [
+        "backlog-atlas",
+        "install",
+        "--repo",
+        "o/r",
+        "--target-root",
+        str(tmp_path),
+    ]
+    rc = ub.main()
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert 'git commit -m "backlog: install Backlog Atlas workflow"' in out
+    assert "git push -u origin HEAD" in out
+    assert "open or merge a PR for the install commit" in out
+    assert "after it lands on the default branch" in out
+
+
+def test_install_remote_defaults_to_pr_delivery_for_github_url(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    captured: dict[str, str] = {}
+
+    def fake_remote_install(
+        repo: str, install_source: inst.InstallSource, delivery: str
+    ) -> None:
+        captured.update(
+            {
+                "repo": repo,
+                "install_from": install_source.pip_spec,
+                "version": install_source.version,
+                "source_type": install_source.source_type,
+                "delivery": delivery,
+            }
+        )
+
+    monkeypatch.setattr(install_sources, "installed_version", lambda: "1.2.3")
+    monkeypatch.setattr(install_github, "install_remote_workflow", fake_remote_install)
+    sys.argv = [
+        "backlog-atlas",
+        "install",
+        "--repo",
+        "https://github.com/o/r.git",
+        "--install-from",
+        "backlog-atlas==2.0.0",
+    ]
+    rc = ub.main()
+    assert rc == 0
+    assert captured == {
+        "repo": "o/r",
+        "install_from": "backlog-atlas==2.0.0",
+        "version": "2.0.0",
+        "source_type": "pypi",
+        "delivery": "pr",
+    }
+
+
+def test_install_remote_supports_push_delivery_for_ssh_url(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    captured: dict[str, str] = {}
+
+    def fake_remote_install(
+        repo: str, install_source: inst.InstallSource, delivery: str
+    ) -> None:
+        captured.update(
+            {
+                "repo": repo,
+                "install_from": install_source.pip_spec,
+                "version": install_source.version,
+                "source_type": install_source.source_type,
+                "delivery": delivery,
+            }
+        )
+
+    monkeypatch.setattr(install_sources, "installed_version", lambda: "1.2.3")
+    monkeypatch.setattr(install_github, "install_remote_workflow", fake_remote_install)
+    sys.argv = [
+        "backlog-atlas",
+        "install",
+        "--repo",
+        "git@github.com:o/r.git",
+        "--delivery",
+        "push",
+    ]
+    rc = ub.main()
+    assert rc == 0
+    assert captured == {
+        "repo": "o/r",
+        "install_from": "backlog-atlas==1.2.3",
+        "version": "1.2.3",
+        "source_type": "pypi",
+        "delivery": "push",
+    }
+
+
+def test_install_remote_bundles_local_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    source_root = _make_backlog_atlas_checkout(tmp_path)
+    captured: dict[str, str] = {}
+    monkeypatch.setattr(
+        install_sources,
+        "build_local_wheel",
+        lambda path: ("backlog_atlas-2.3.4-py3-none-any.whl", b"wheel bytes"),
+    )
+
+    def fake_remote_install(
+        repo: str, install_source: inst.InstallSource, delivery: str
+    ) -> None:
+        captured.update(
+            {
+                "repo": repo,
+                "install_from": install_source.pip_spec,
+                "version": install_source.version,
+                "source_type": install_source.source_type,
+                "bundled_wheel_path": install_source.bundled_wheel_path or "",
+                "delivery": delivery,
+            }
+        )
+
+    monkeypatch.setattr(install_github, "install_remote_workflow", fake_remote_install)
+    sys.argv = [
+        "backlog-atlas",
+        "install",
+        "--repo",
+        "https://github.com/o/r.git",
+        "--install-from",
+        str(source_root),
+    ]
+    rc = ub.main()
+    assert rc == 0
+    assert captured == {
+        "repo": "o/r",
+        "install_from": (
+            "backlog-atlas-branch/.backlog-atlas/packages/"
+            "backlog_atlas-2.3.4-py3-none-any.whl"
+        ),
+        "version": "2.3.4",
+        "source_type": "bundled-wheel",
+        "bundled_wheel_path": (
+            ".backlog-atlas/packages/backlog_atlas-2.3.4-py3-none-any.whl"
+        ),
+        "delivery": "pr",
+    }
+
+
+def test_install_remote_pr_writes_workflow_and_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    calls: list[tuple[Any, ...]] = []
+
+    monkeypatch.setattr(install_sources, "installed_version", lambda: "1.2.3")
+    monkeypatch.setattr(install_github, "github_default_branch", lambda repo: "develop")
+    monkeypatch.setattr(
+        install_github,
+        "ensure_github_branch",
+        lambda repo, branch, source_branch: calls.append(
+            ("branch", repo, branch, source_branch)
+        ),
+    )
+
+    def fake_put(repo: str, branch: str, path: str, content: str, message: str) -> None:
+        calls.append(("put", repo, branch, path, content, message))
+
+    monkeypatch.setattr(install_github, "put_github_file", fake_put)
+    monkeypatch.setattr(
+        install_github,
+        "ensure_github_pr",
+        lambda repo, branch, base_branch: calls.append(
+            ("pr", repo, branch, base_branch)
+        ),
+    )
+
+    install_github.install_remote_workflow(
+        "o/r",
+        inst.InstallSource(
+            pip_spec="backlog-atlas==1.2.3",
+            version="1.2.3",
+            source_type="pypi",
+        ),
+        "pr",
+    )
+
+    put_calls = [call for call in calls if call[0] == "put"]
+    assert [call[3] for call in put_calls] == [
+        ".github/workflows/update-backlog-atlas.yml",
+        ".github/backlog-atlas.json",
+    ]
+    metadata = json.loads(put_calls[1][4])
+    assert metadata["installed_version"] == "1.2.3"
+    assert metadata["install_source"] == "backlog-atlas==1.2.3"
+    assert metadata["source_type"] == "pypi"
+    assert "ref: ${{ github.event.repository.default_branch }}" in put_calls[0][4]
+    assert "ref: main" not in put_calls[0][4]
+    assert calls[0] == ("branch", "o/r", "backlog-atlas-install", "develop")
+    assert calls[-1] == ("pr", "o/r", "backlog-atlas-install", "develop")
+
+
+def test_bundled_wheel_is_published_to_backlog_branch(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    calls: list[tuple[Any, ...]] = []
+    source = inst.InstallSource(
+        pip_spec="backlog-atlas-branch/.backlog-atlas/packages/pkg.whl",
+        version="2.3.4",
+        source_type="bundled-wheel",
+        bundled_wheel_path=".backlog-atlas/packages/pkg.whl",
+        bundled_wheel_content=b"wheel bytes",
+    )
+    monkeypatch.setattr(
+        install_github, "github_ref_sha", lambda repo, branch: "branch-sha"
+    )
+    monkeypatch.setattr(
+        install_github,
+        "put_github_file_bytes",
+        lambda repo, branch, path, content, message: calls.append(
+            ("put-bytes", repo, branch, path, content, message)
+        ),
+    )
+
+    install_github.ensure_backlog_branch_with_bundle("o/r", source)
+
+    assert calls == [
+        (
+            "put-bytes",
+            "o/r",
+            "backlog-atlas",
+            ".backlog-atlas/packages/pkg.whl",
+            b"wheel bytes",
+            "backlog: bundle Backlog Atlas package",
+        )
+    ]
+
+
+def test_uninstall_writes_self_removing_workflow_and_keeps_branch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     wf = tmp_path / ".github" / "workflows" / "update-backlog-atlas.yml"
     wf.parent.mkdir(parents=True)
     wf.write_text("workflow content\n", encoding="utf-8")
-    monkeypatch.setattr(ub, "gh_branch_exists", lambda repo, branch: False)
     monkeypatch.setattr(ub, "resolve_repo", lambda r: "o/r")
     sys.argv = [
         "backlog-atlas",
@@ -691,9 +1132,41 @@ def test_uninstall_removes_workflow(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         "o/r",
         "--target-root",
         str(tmp_path),
-        "--keep-branch",
+    ]
+    rc = ub.main()
+    assert rc == 0
+    content = wf.read_text(encoding="utf-8")
+    assert "name: Uninstall Backlog Atlas" in content
+    assert 'BACKLOG_ATLAS_DELETE_BRANCH: "false"' in content
+    assert "github.event.repository.default_branch" in content
+    assert "ref: main" not in content
+    assert "branches: [main]" not in content
+    assert "retained $BACKLOG_ATLAS_BRANCH branch" in content
+    assert (
+        "git rm --ignore-unmatch .github/backlog-atlas.json "
+        ".github/workflows/update-backlog-atlas.yml"
+    ) in content
+
+
+def test_uninstall_delete_branch_is_encoded_in_workflow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    wf = tmp_path / ".github" / "workflows" / "update-backlog-atlas.yml"
+    wf.parent.mkdir(parents=True)
+    wf.write_text("workflow content\n", encoding="utf-8")
+    monkeypatch.setattr(ub, "resolve_repo", lambda r: "o/r")
+    sys.argv = [
+        "backlog-atlas",
+        "uninstall",
+        "--repo",
+        "o/r",
+        "--target-root",
+        str(tmp_path),
+        "--delete-branch",
         "--yes",
     ]
     rc = ub.main()
     assert rc == 0
-    assert not wf.exists()
+    content = wf.read_text(encoding="utf-8")
+    assert 'BACKLOG_ATLAS_DELETE_BRANCH: "true"' in content
+    assert 'git push origin --delete "$BACKLOG_ATLAS_BRANCH"' in content

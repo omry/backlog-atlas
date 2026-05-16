@@ -20,8 +20,51 @@ env:
   BACKLOG_ATLAS_BRANCH: __BACKLOG_ATLAS_BRANCH__
 
 jobs:
+  ensure-backlog-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure Backlog Atlas branch exists
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          remote_url="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if git ls-remote --exit-code --heads "$remote_url" "$BACKLOG_ATLAS_BRANCH" >/dev/null 2>&1; then
+            exit 0
+          fi
+
+          workdir="$(mktemp -d)"
+          git init "$workdir"
+          cd "$workdir"
+          git checkout --orphan "$BACKLOG_ATLAS_BRANCH"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          cat > BACKLOG.md <<EOF
+          # Detailed Open Issues: $GITHUB_REPOSITORY
+
+          <!-- BEGIN GENERATED BACKLOG -->
+          *Generated on: -*
+          <!-- END GENERATED BACKLOG -->
+
+          ## Manual comments
+          <!-- BEGIN MANUAL COMMENTS -->
+          \`\`\`json
+          {
+            "issues": {},
+            "general": []
+          }
+          \`\`\`
+          <!-- END MANUAL COMMENTS -->
+          EOF
+          git add BACKLOG.md
+          git commit -m "backlog: initialize $BACKLOG_ATLAS_BRANCH branch"
+          if git push "$remote_url" HEAD:"$BACKLOG_ATLAS_BRANCH"; then
+            exit 0
+          fi
+          git ls-remote --exit-code --heads "$remote_url" "$BACKLOG_ATLAS_BRANCH" >/dev/null
+
   log-event:
     if: github.event_name == 'issues' || github.event_name == 'pull_request'
+    needs: ensure-backlog-branch
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -58,6 +101,7 @@ jobs:
           exit 1
 
   process:
+    needs: ensure-backlog-branch
     concurrency:
       group: update-backlog-atlas
       cancel-in-progress: true
@@ -65,7 +109,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.event.repository.default_branch }}
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.BACKLOG_ATLAS_BRANCH }}
