@@ -5,11 +5,8 @@ from pathlib import Path
 
 from . import artifacts, github, repo
 from .commands import run_command
-from .constants import (
-    BACKLOG_BRANCH,
-    INSTALL_COMMIT_MESSAGE,
-)
-from .models import InstallSource
+from .constants import BACKLOG_BRANCH
+from .models import InstallSource, describe_install_source, install_commit_message
 
 
 def ensure_worktree_clean(target_root: Path, vcs: str) -> bool:
@@ -42,8 +39,10 @@ def add_local_install_files(
         raise RuntimeError(f"unsupported VCS: {vcs}")
 
 
-def local_install_commands(vcs: str, on_default: bool | None) -> list[str]:
-    commit_msg = f'"{INSTALL_COMMIT_MESSAGE}"'
+def local_install_commands(
+    vcs: str, on_default: bool | None, install_source: InstallSource
+) -> list[str]:
+    commit_msg = f'"{install_commit_message(install_source)}"'
     if vcs == "sl":
         return [f"sl commit -m {commit_msg}", "sl push"]
     if vcs == "git":
@@ -52,12 +51,14 @@ def local_install_commands(vcs: str, on_default: bool | None) -> list[str]:
     raise RuntimeError(f"unsupported VCS: {vcs}")
 
 
-def print_local_install_next_steps(repo_name: str, target_root: Path, vcs: str) -> None:
+def print_local_install_next_steps(
+    repo_name: str, target_root: Path, vcs: str, install_source: InstallSource
+) -> None:
     print()
     print("Next steps:")
     on_default = repo.is_on_default_branch(target_root, vcs)
     print(f"  - from {target_root}, run:")
-    for command in local_install_commands(vcs, on_default):
+    for command in local_install_commands(vcs, on_default, install_source):
         print(f"      {command}")
     if on_default is True:
         print("  - the install commit will be on the default branch")
@@ -113,15 +114,19 @@ def run_local_install(
         print_local_install_plan(repo_name, target_root, install_source, vcs)
         return 0
 
+    print(f"Checking working tree at {target_root}")
     if ensure_worktree_clean(target_root, vcs) is False:
         return 1
+    print("Working tree is clean")
     github.ensure_backlog_branch_with_bundle(repo_name, install_source)
 
     print(f"Target repo: {repo_name}")
     print(f"Target working tree: {target_root}")
     print(f"Workflow will install Backlog Atlas from: {install_source.pip_spec}")
+    print(f"Resolved install: {describe_install_source(install_source)}")
 
     result = artifacts.write_install_artifacts(target_root, install_source)
+    print("Checked install workflow and metadata")
     if result.changed_paths:
         if result.workflow_path in result.changed_paths:
             print(f"wrote workflow to {result.workflow_path}")
@@ -131,7 +136,7 @@ def run_local_install(
             print(f"wrote install metadata to {result.metadata_path}")
         add_local_install_files(target_root, result.changed_paths, vcs)
         print(f"added install artifact(s) with {vcs}")
-        print_local_install_next_steps(repo_name, target_root, vcs)
+        print_local_install_next_steps(repo_name, target_root, vcs, install_source)
     else:
         print(f"workflow already exists at {result.workflow_path}")
         if result.workflow_matches:

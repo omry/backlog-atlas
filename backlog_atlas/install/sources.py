@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 from ..errors import UserError
-from .commands import run_command
+from .commands import run_command, try_command
 from .constants import BUNDLED_PACKAGE_DIR
 from .models import InstallSource
 
@@ -76,8 +76,10 @@ def package_version_from_checkout(source_root: Path) -> str:
 
 
 def build_local_wheel(source_root: Path) -> tuple[str, bytes]:
+    build_tag = checkout_wheel_build_tag(source_root)
     with tempfile.TemporaryDirectory(prefix="backlog-atlas-wheel-") as tmp:
         out_dir = Path(tmp)
+        print(f"Building Backlog Atlas wheel from {source_root}...")
         try:
             run_command(
                 [
@@ -105,7 +107,64 @@ def build_local_wheel(source_root: Path) -> tuple[str, bytes]:
         if len(wheels) != 1:
             raise UserError(f"expected one built wheel, found {len(wheels)}")
         wheel = wheels[0]
-        return wheel.name, wheel.read_bytes()
+        storage_name = wheel_storage_name(wheel.name, build_tag)
+        print(f"Built wheel {storage_name}")
+        return storage_name, wheel.read_bytes()
+
+
+def checkout_state(source_root: Path) -> tuple[str | None, bool]:
+    revision = try_command(["git", "rev-parse", "--short=12", "HEAD"], cwd=source_root)
+    if revision:
+        status = try_command(["git", "status", "--porcelain"], cwd=source_root)
+        return revision.strip().splitlines()[0], bool(status and status.strip())
+
+    revision = try_command(
+        ["sl", "log", "-r", ".", "-T", "{node|short}\\n"], cwd=source_root
+    )
+    if revision:
+        status = try_command(["sl", "status"], cwd=source_root)
+        return revision.strip().splitlines()[0], bool(status and status.strip())
+
+    return None, False
+
+
+def checkout_wheel_build_tag(source_root: Path) -> str | None:
+    revision, dirty = checkout_state(source_root)
+    if revision is None:
+        return None
+    tag = f"0.g{re.sub(r'[^A-Za-z0-9.]+', '.', revision).strip('.')}"
+    if dirty:
+        tag += ".dirty"
+    return tag
+
+
+def wheel_storage_name(wheel_name: str, build_tag: str | None) -> str:
+    if build_tag is None:
+        return wheel_name
+    if not wheel_name.endswith(".whl"):
+        raise UserError(f"unexpected wheel filename: {wheel_name}")
+    stem = wheel_name[:-4]
+    parts = stem.split("-")
+    if len(parts) == 5:
+        distribution, version, python_tag, abi_tag, platform_tag = parts
+        return (
+            f"{distribution}-{version}-{build_tag}-"
+            f"{python_tag}-{abi_tag}-{platform_tag}.whl"
+        )
+    if len(parts) == 6:
+        distribution, version, existing_build, python_tag, abi_tag, platform_tag = parts
+        return (
+            f"{distribution}-{version}-{existing_build}.{build_tag}-"
+            f"{python_tag}-{abi_tag}-{platform_tag}.whl"
+        )
+    raise UserError(f"unexpected wheel filename: {wheel_name}")
+
+
+def dry_run_wheel_name(source_root: Path, version: str) -> str:
+    build_tag = checkout_wheel_build_tag(source_root)
+    if build_tag is None:
+        return "<built-wheel>"
+    return f"backlog_atlas-{version}-{build_tag}-py3-none-any.whl"
 
 
 def resolve_local_checkout_install_source(
@@ -114,7 +173,9 @@ def resolve_local_checkout_install_source(
     source_root = source_root.resolve()
     version = package_version_from_checkout(source_root)
     if not build_wheel:
-        bundled_path = f"{BUNDLED_PACKAGE_DIR}/<built-wheel>"
+        bundled_path = (
+            f"{BUNDLED_PACKAGE_DIR}/{dry_run_wheel_name(source_root, version)}"
+        )
         return InstallSource(
             pip_spec=f"backlog-atlas-branch/{bundled_path}",
             version=version,

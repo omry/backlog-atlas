@@ -272,6 +272,46 @@ def test_compare_detects_closed():
 
 
 # ---------------------------------------------------------------------------
+# commit message generation
+# ---------------------------------------------------------------------------
+
+
+def test_commit_message_uses_plain_numbers_not_github_refs():
+    message = ub.build_commit_message(
+        new_issues=[{"number": "1"}],
+        status_changes=[
+            {
+                "number": "2",
+                "old_status": "not started",
+                "new_status": "in progress",
+            }
+        ],
+        label_changes=[
+            {
+                "number": "3",
+                "added": ["bug"],
+                "removed": ["question"],
+            }
+        ],
+        closed_issues=[{"number": "4"}],
+        pr_changes=[
+            {
+                "number": "5",
+                "added_prs": ["10"],
+                "removed_prs": ["11"],
+            }
+        ],
+        open_count=9,
+    )
+
+    assert "#" not in message
+    assert message == (
+        "backlog: new 1; closed 4; 2 not started → in progress; "
+        "link 10 to 5; unlink 11 from 5; 3 labels: +bug; -question [skip ci]"
+    )
+
+
+# ---------------------------------------------------------------------------
 # save_snapshot / load_json_file with custom path
 # ---------------------------------------------------------------------------
 
@@ -899,7 +939,7 @@ def test_install_local_checkout_rejects_delivery(
 
 
 def test_resolve_install_source_from_local_checkout_builds_bundled_wheel(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ):
     source_root = _make_backlog_atlas_checkout(tmp_path)
     monkeypatch.setattr(
@@ -910,6 +950,7 @@ def test_resolve_install_source_from_local_checkout_builds_bundled_wheel(
 
     source = install_sources.resolve_install_source(str(source_root))
 
+    assert capsys.readouterr().out == ""
     assert source == InstallSource(
         pip_spec=(
             "backlog-atlas-branch/.backlog-atlas/packages/"
@@ -942,6 +983,38 @@ def test_build_local_wheel_explains_missing_build_package(
     assert "needs to build a bundled wheel" in message
     assert "missing the 'build' package" in message
     assert "-m pip install build" in message
+
+
+def test_build_local_wheel_storage_name_includes_dirty_revision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    source_root = _make_backlog_atlas_checkout(tmp_path)
+
+    def fake_try_command(args: list[str], cwd: Path | None = None) -> str | None:
+        assert cwd == source_root
+        if args[:2] == ["git", "rev-parse"]:
+            return "abc123def456\n"
+        if args[:2] == ["git", "status"]:
+            return " M backlog_atlas/core.py\n"
+        return None
+
+    def fake_run_command(args: list[str], cwd: Path | None = None) -> str:
+        assert cwd == source_root
+        out_dir = Path(args[args.index("--outdir") + 1])
+        (out_dir / "backlog_atlas-2.3.4-py3-none-any.whl").write_bytes(b"wheel bytes")
+        return ""
+
+    monkeypatch.setattr(install_sources, "try_command", fake_try_command)
+    monkeypatch.setattr(install_sources, "run_command", fake_run_command)
+
+    wheel_name, wheel_content = install_sources.build_local_wheel(source_root)
+
+    assert wheel_name == ("backlog_atlas-2.3.4-0.gabc123def456.dirty-py3-none-any.whl")
+    assert wheel_content == b"wheel bytes"
+    assert (
+        "Built wheel backlog_atlas-2.3.4-0.gabc123def456.dirty-py3-none-any.whl"
+        in capsys.readouterr().out
+    )
 
 
 def test_installed_local_source_root_reads_direct_url(
@@ -1019,6 +1092,71 @@ def test_resolve_install_source_local_source_dry_run_does_not_build_wheel(
     )
 
 
+def test_local_source_dry_run_wheel_name_includes_dirty_revision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    source_root = _make_backlog_atlas_checkout(tmp_path)
+
+    def fake_try_command(args: list[str], cwd: Path | None = None) -> str | None:
+        assert cwd == source_root
+        if args[:2] == ["git", "rev-parse"]:
+            return "abc123def456\n"
+        if args[:2] == ["git", "status"]:
+            return " M backlog_atlas/core.py\n"
+        return None
+
+    monkeypatch.setattr(install_sources, "try_command", fake_try_command)
+    monkeypatch.setattr(
+        install_sources,
+        "build_local_wheel",
+        lambda path: pytest.fail("should not build wheel for dry run"),
+    )
+
+    source = install_sources.resolve_install_source(str(source_root), dry_run=True)
+
+    assert source == InstallSource(
+        pip_spec=(
+            "backlog-atlas-branch/.backlog-atlas/packages/"
+            "backlog_atlas-2.3.4-0.gabc123def456.dirty-py3-none-any.whl"
+        ),
+        version="2.3.4",
+        source_type="bundled-wheel",
+        bundled_wheel_path=(
+            ".backlog-atlas/packages/"
+            "backlog_atlas-2.3.4-0.gabc123def456.dirty-py3-none-any.whl"
+        ),
+    )
+
+
+def test_wheel_storage_name_adds_checkout_build_tag():
+    assert (
+        install_sources.wheel_storage_name(
+            "backlog_atlas-0.1.0-py3-none-any.whl", "0.gabc123def456.dirty"
+        )
+        == "backlog_atlas-0.1.0-0.gabc123def456.dirty-py3-none-any.whl"
+    )
+
+
+def test_checkout_wheel_build_tag_falls_back_to_sapling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    source_root = _make_backlog_atlas_checkout(tmp_path)
+
+    def fake_try_command(args: list[str], cwd: Path | None = None) -> str | None:
+        assert cwd == source_root
+        if args[:2] == ["git", "rev-parse"]:
+            return None
+        if args[:2] == ["sl", "log"]:
+            return "b76abe8f192e\n"
+        if args[:2] == ["sl", "status"]:
+            return ""
+        return None
+
+    monkeypatch.setattr(install_sources, "try_command", fake_try_command)
+
+    assert install_sources.checkout_wheel_build_tag(source_root) == "0.gb76abe8f192e"
+
+
 def test_install_rejects_floating_install_source(
     capsys: pytest.CaptureFixture[str],
 ):
@@ -1090,7 +1228,10 @@ def test_install_local_checkout_guides_default_branch_push(
     rc = ub.main()
     assert rc == 0
     out = capsys.readouterr().out
-    assert 'git commit -m "backlog: install Backlog Atlas workflow"' in out
+    assert f"Checking working tree at {tmp_path}" in out
+    assert "Working tree is clean" in out
+    assert "Checked install workflow and metadata" in out
+    assert 'git commit -m "backlog: install Backlog Atlas 1.2.3 workflow"' in out
     assert "git push" in out
     assert "git push -u origin HEAD" not in out
     assert "the install commit will be on the default branch" in out
@@ -1113,14 +1254,14 @@ def test_install_local_checkout_guides_pr_from_non_default_branch(
     rc = ub.main()
     assert rc == 0
     out = capsys.readouterr().out
-    assert 'git commit -m "backlog: install Backlog Atlas workflow"' in out
+    assert 'git commit -m "backlog: install Backlog Atlas 1.2.3 workflow"' in out
     assert "git push -u origin HEAD" in out
     assert "open or merge a PR for the install commit" in out
     assert "after it lands on the default branch" in out
 
 
 def test_install_remote_defaults_to_pr_delivery_for_github_url(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ):
     captured: dict[str, str] = {}
 
@@ -1149,6 +1290,9 @@ def test_install_remote_defaults_to_pr_delivery_for_github_url(
     ]
     rc = ub.main()
     assert rc == 0
+    out = capsys.readouterr().out
+    assert "opened or updated Backlog Atlas install PR for o/r" in out
+    assert "installs Backlog Atlas 2.0.0 from backlog-atlas==2.0.0" in out
     assert captured == {
         "repo": "o/r",
         "install_from": "backlog-atlas==2.0.0",
@@ -1159,7 +1303,7 @@ def test_install_remote_defaults_to_pr_delivery_for_github_url(
 
 
 def test_install_remote_supports_push_delivery_for_ssh_url(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ):
     captured: dict[str, str] = {}
 
@@ -1188,6 +1332,9 @@ def test_install_remote_supports_push_delivery_for_ssh_url(
     ]
     rc = ub.main()
     assert rc == 0
+    out = capsys.readouterr().out
+    assert "pushed Backlog Atlas workflow to o/r" in out
+    assert "installs Backlog Atlas 1.2.3 from backlog-atlas==1.2.3" in out
     assert captured == {
         "repo": "o/r",
         "install_from": "backlog-atlas==1.2.3",
@@ -1243,7 +1390,7 @@ def test_install_remote_dry_run_verifies_repo_without_writing(
     assert "Default branch: main" in out
     assert "Delivery: pull request" in out
     assert "Workflow would install Backlog Atlas from: backlog-atlas==1.2.3" in out
-    assert "Would create or update backlog-atlas-install from main" in out
+    assert "Would create or update temporary_backlog_atlas_install_pr from main" in out
     assert ".github/workflows/update-backlog-atlas.yml" in out
     assert ".github/backlog-atlas.json" in out
 
@@ -1421,7 +1568,7 @@ def test_install_remote_bundles_local_source(
 
 
 def test_install_remote_pr_writes_workflow_and_metadata(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ):
     calls: list[tuple[Any, ...]] = []
 
@@ -1442,8 +1589,8 @@ def test_install_remote_pr_writes_workflow_and_metadata(
     monkeypatch.setattr(
         install_github,
         "ensure_github_pr",
-        lambda repo, branch, base_branch: calls.append(
-            ("pr", repo, branch, base_branch)
+        lambda repo, branch, base_branch, install_source: calls.append(
+            ("pr", repo, branch, base_branch, install_source)
         ),
     )
 
@@ -1457,6 +1604,21 @@ def test_install_remote_pr_writes_workflow_and_metadata(
         "pr",
     )
 
+    out = capsys.readouterr().out
+    assert "Preparing remote install for o/r" in out
+    assert "Resolving default branch" in out
+    assert "Default branch is develop" in out
+    assert (
+        "Ensuring install branch temporary_backlog_atlas_install_pr from develop" in out
+    )
+    assert "Writing workflow to temporary_backlog_atlas_install_pr" in out
+    assert "Writing install metadata to temporary_backlog_atlas_install_pr" in out
+    assert calls[0] == (
+        "branch",
+        "o/r",
+        "temporary_backlog_atlas_install_pr",
+        "develop",
+    )
     put_calls = [call for call in calls if call[0] == "put"]
     assert [call[3] for call in put_calls] == [
         ".github/workflows/update-backlog-atlas.yml",
@@ -1468,8 +1630,71 @@ def test_install_remote_pr_writes_workflow_and_metadata(
     assert metadata["source_type"] == "pypi"
     assert "ref: ${{ github.event.repository.default_branch }}" in put_calls[0][4]
     assert "ref: main" not in put_calls[0][4]
-    assert calls[0] == ("branch", "o/r", "backlog-atlas-install", "develop")
-    assert calls[-1] == ("pr", "o/r", "backlog-atlas-install", "develop")
+    assert put_calls[0][5] == "backlog: install Backlog Atlas 1.2.3 workflow"
+    assert put_calls[1][5] == "backlog: install Backlog Atlas 1.2.3 workflow"
+    assert calls[-1][:4] == (
+        "pr",
+        "o/r",
+        "temporary_backlog_atlas_install_pr",
+        "develop",
+    )
+    assert calls[-1][4].version == "1.2.3"
+
+
+def test_install_pr_text_includes_version_and_source(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    calls: list[list[str]] = []
+    source = InstallSource(
+        pip_spec="backlog-atlas==2.0.0",
+        version="2.0.0",
+        source_type="pypi",
+    )
+
+    def fake_run_gh(args: list[str], input_text: str | None = None) -> str:
+        calls.append(args)
+        if args[:2] == ["pr", "list"]:
+            return "[]"
+        return ""
+
+    monkeypatch.setattr(install_github, "run_gh", fake_run_gh)
+
+    install_github.ensure_github_pr("o/r", "install-branch", "main", source)
+
+    create_call = calls[-1]
+    assert create_call[:2] == ["pr", "create"]
+    assert "Install Backlog Atlas 2.0.0" in create_call
+    body = create_call[create_call.index("--body") + 1]
+    assert "Installs Backlog Atlas 2.0.0 from backlog-atlas==2.0.0" in body
+    assert "Install source: `backlog-atlas==2.0.0`" in body
+
+
+def test_install_pr_text_is_updated_for_existing_pr(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    calls: list[list[str]] = []
+    source = InstallSource(
+        pip_spec="backlog-atlas==2.0.0",
+        version="2.0.0",
+        source_type="pypi",
+    )
+
+    def fake_run_gh(args: list[str], input_text: str | None = None) -> str:
+        calls.append(args)
+        if args[:2] == ["pr", "list"]:
+            return json.dumps([{"number": 7}])
+        return ""
+
+    monkeypatch.setattr(install_github, "run_gh", fake_run_gh)
+
+    install_github.ensure_github_pr("o/r", "install-branch", "main", source)
+
+    edit_call = calls[-1]
+    assert edit_call[:3] == ["pr", "edit", "7"]
+    assert "Install Backlog Atlas 2.0.0" in edit_call
+    body = edit_call[edit_call.index("--body") + 1]
+    assert "Installs Backlog Atlas 2.0.0 from backlog-atlas==2.0.0" in body
+    assert "Install source: `backlog-atlas==2.0.0`" in body
 
 
 def test_bundled_wheel_is_published_to_backlog_branch(
@@ -1503,7 +1728,7 @@ def test_bundled_wheel_is_published_to_backlog_branch(
             "backlog-atlas",
             ".backlog-atlas/packages/pkg.whl",
             b"wheel bytes",
-            "backlog: bundle Backlog Atlas package",
+            "backlog: bundle Backlog Atlas 2.3.4 package",
         )
     ]
 

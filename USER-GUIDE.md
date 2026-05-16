@@ -190,7 +190,9 @@ kind of source as the CLI you are running:
   version, such as `backlog-atlas==1.2.3`.
 - If the CLI was installed from a local checkout, including editable installs,
   Backlog Atlas builds a wheel from that checkout and bundles it on the target
-  repo's `backlog-atlas` branch.
+  repo's `backlog-atlas` branch. The bundled wheel filename includes the
+  checkout commit hash and ends in `.dirty` when the checkout has uncommitted
+  changes.
 
 For pre-publish testing, `--install-from` can override this and point at a
 specific local Backlog Atlas checkout:
@@ -202,3 +204,37 @@ backlog-atlas install \
 ```
 
 Bundled-wheel installs require `gh` and write access to the target repository.
+
+## Upgrade
+
+To upgrade an installed repository, upgrade the `backlog-atlas` CLI in the
+environment where you run setup, then rerun the same install mode you used
+before.
+
+For a normal PyPI install:
+
+```sh
+python -m pip install --upgrade backlog-atlas
+```
+
+Then preview and apply the install update.
+
+For local install:
+
+```sh
+cd /path/to/target-repo
+backlog-atlas install --dry-run
+backlog-atlas install
+```
+
+For remote install:
+
+```sh
+backlog-atlas install --repo https://github.com/owner/name --dry-run
+backlog-atlas install --repo https://github.com/owner/name
+```
+
+This updates the installed workflow and `.github/backlog-atlas.json` so future
+workflow runs use the upgraded Backlog Atlas source. If the generated
+`backlog-atlas` branch already exists, the next workflow run updates its
+machine-generated files in place.

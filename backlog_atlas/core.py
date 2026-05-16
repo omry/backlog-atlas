@@ -982,27 +982,27 @@ def build_commit_message(
     parts: list[str] = []
 
     if new_issues:
-        nums = ", ".join(f"#{r['number']}" for r in new_issues[:3])
+        nums = ", ".join(str(r["number"]) for r in new_issues[:3])
         suffix = f" +{len(new_issues) - 3} more" if len(new_issues) > 3 else ""
         parts.append(f"new {nums}{suffix}")
 
     if closed_issues:
-        nums = ", ".join(f"#{r['number']}" for r in closed_issues[:3])
+        nums = ", ".join(str(r["number"]) for r in closed_issues[:3])
         suffix = f" +{len(closed_issues) - 3} more" if len(closed_issues) > 3 else ""
         parts.append(f"closed {nums}{suffix}")
 
     for c in status_changes[:3]:
-        parts.append(f"#{c['number']} {c['old_status']} → {c['new_status']}")
+        parts.append(f"{c['number']} {c['old_status']} → {c['new_status']}")
     if len(status_changes) > 3:
         parts.append(f"+{len(status_changes) - 3} more status changes")
 
     for c in pr_changes[:3]:
         if c["added_prs"]:
-            prs = ", ".join(f"#{p}" for p in c["added_prs"])
-            parts.append(f"link {prs} to #{c['number']}")
+            prs = ", ".join(str(p) for p in c["added_prs"])
+            parts.append(f"link {prs} to {c['number']}")
         if c["removed_prs"]:
-            prs = ", ".join(f"#{p}" for p in c["removed_prs"])
-            parts.append(f"unlink {prs} from #{c['number']}")
+            prs = ", ".join(str(p) for p in c["removed_prs"])
+            parts.append(f"unlink {prs} from {c['number']}")
     if len(pr_changes) > 3:
         parts.append(f"+{len(pr_changes) - 3} more PR changes")
 
@@ -1012,7 +1012,7 @@ def build_commit_message(
             pieces.append("+" + ", ".join(c["added"]))
         if c.get("removed"):
             pieces.append("-" + ", ".join(c["removed"]))
-        parts.append(f"#{c['number']} labels: {'; '.join(pieces)}")
+        parts.append(f"{c['number']} labels: {'; '.join(pieces)}")
     if len(label_changes) > 2:
         parts.append(f"+{len(label_changes) - 2} more label changes")
 

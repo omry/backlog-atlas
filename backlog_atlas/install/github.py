@@ -10,11 +10,17 @@ from .commands import run_gh, try_gh
 from .constants import (
     BACKLOG_BRANCH,
     INSTALL_BRANCH,
-    INSTALL_COMMIT_MESSAGE,
     INSTALL_METADATA_RELATIVE_PATH,
     WORKFLOW_RELATIVE_PATH,
 )
-from .models import InstallSource
+from .models import (
+    InstallSource,
+    bundle_commit_message,
+    describe_install_source,
+    install_commit_message,
+    install_pr_body,
+    install_pr_title,
+)
 
 
 def github_default_branch(repo: str) -> str:
@@ -143,16 +149,22 @@ def ensure_backlog_branch_with_bundle(repo: str, install_source: InstallSource) 
     ):
         return
 
+    print(
+        f"Publishing bundled wheel to {BACKLOG_BRANCH}: "
+        f"{install_source.bundled_wheel_path}"
+    )
     if github_ref_sha(repo, BACKLOG_BRANCH):
         put_github_file_bytes(
             repo,
             BACKLOG_BRANCH,
             install_source.bundled_wheel_path,
             install_source.bundled_wheel_content,
-            "backlog: bundle Backlog Atlas package",
+            bundle_commit_message(install_source),
         )
+        print(f"Updated bundled wheel on {BACKLOG_BRANCH}")
         return
 
+    print(f"Creating {BACKLOG_BRANCH} branch for bundled wheel")
     tree_sha = create_tree(
         repo,
         {
@@ -163,6 +175,7 @@ def ensure_backlog_branch_with_bundle(repo: str, install_source: InstallSource) 
         repo, f"backlog: initialize {BACKLOG_BRANCH} branch", tree_sha
     )
     create_branch_ref(repo, BACKLOG_BRANCH, commit_sha)
+    print(f"Created {BACKLOG_BRANCH} branch with bundled wheel")
 
 
 def ensure_github_branch(repo: str, branch: str, source_branch: str) -> None:
@@ -178,7 +191,12 @@ def ensure_github_branch(repo: str, branch: str, source_branch: str) -> None:
     )
 
 
-def ensure_github_pr(repo: str, branch: str, base_branch: str) -> None:
+def ensure_github_pr(
+    repo: str, branch: str, base_branch: str, install_source: InstallSource
+) -> None:
+    title = install_pr_title(install_source)
+    body = install_pr_body(install_source)
+    print(f"Checking for existing install PR from {branch} to {base_branch}")
     existing = run_gh(
         [
             "pr",
@@ -192,13 +210,30 @@ def ensure_github_pr(repo: str, branch: str, base_branch: str) -> None:
             "--state",
             "open",
             "--json",
-            "url",
+            "number",
             "--limit",
             "1",
         ]
     )
-    if json.loads(existing):
+    existing_prs = json.loads(existing)
+    if existing_prs:
+        number = str(existing_prs[0]["number"])
+        print(f"Updating existing install PR #{number}")
+        run_gh(
+            [
+                "pr",
+                "edit",
+                number,
+                "--repo",
+                repo,
+                "--title",
+                title,
+                "--body",
+                body,
+            ]
+        )
         return
+    print(f"Creating install PR from {branch} to {base_branch}")
     run_gh(
         [
             "pr",
@@ -210,9 +245,9 @@ def ensure_github_pr(repo: str, branch: str, base_branch: str) -> None:
             "--head",
             branch,
             "--title",
-            "Install Backlog Atlas",
+            title,
             "--body",
-            "Adds the Backlog Atlas workflow.",
+            body,
         ]
     )
 
@@ -220,45 +255,60 @@ def ensure_github_pr(repo: str, branch: str, base_branch: str) -> None:
 def install_remote_workflow(
     repo: str, install_source: InstallSource, delivery: str
 ) -> None:
+    print(f"Preparing remote install for {repo}")
     ensure_backlog_branch_with_bundle(repo, install_source)
+    print("Resolving default branch")
     default_branch = github_default_branch(repo)
+    print(f"Default branch is {default_branch}")
     workflow_content = load_workflow_template(install_source.pip_spec)
     metadata_content = build_install_metadata(install_source)
+    commit_message = install_commit_message(install_source)
     if delivery == "push":
+        print(f"Writing workflow to {default_branch}: {WORKFLOW_RELATIVE_PATH}")
         put_github_file(
             repo,
             default_branch,
             WORKFLOW_RELATIVE_PATH,
             workflow_content,
-            INSTALL_COMMIT_MESSAGE,
+            commit_message,
+        )
+        print(
+            f"Writing install metadata to {default_branch}: "
+            f"{INSTALL_METADATA_RELATIVE_PATH}"
         )
         put_github_file(
             repo,
             default_branch,
             INSTALL_METADATA_RELATIVE_PATH,
             metadata_content,
-            INSTALL_COMMIT_MESSAGE,
+            commit_message,
         )
         return
 
     if delivery != "pr":
         raise RuntimeError(f"unsupported delivery mode: {delivery}")
+    print(f"Ensuring install branch {INSTALL_BRANCH} from {default_branch}")
     ensure_github_branch(repo, INSTALL_BRANCH, default_branch)
+    print(f"Writing workflow to {INSTALL_BRANCH}: {WORKFLOW_RELATIVE_PATH}")
     put_github_file(
         repo,
         INSTALL_BRANCH,
         WORKFLOW_RELATIVE_PATH,
         workflow_content,
-        INSTALL_COMMIT_MESSAGE,
+        commit_message,
+    )
+    print(
+        f"Writing install metadata to {INSTALL_BRANCH}: "
+        f"{INSTALL_METADATA_RELATIVE_PATH}"
     )
     put_github_file(
         repo,
         INSTALL_BRANCH,
         INSTALL_METADATA_RELATIVE_PATH,
         metadata_content,
-        INSTALL_COMMIT_MESSAGE,
+        commit_message,
     )
-    ensure_github_pr(repo, INSTALL_BRANCH, default_branch)
+    ensure_github_pr(repo, INSTALL_BRANCH, default_branch, install_source)
 
 
 def print_remote_install_plan(
@@ -302,8 +352,11 @@ def run_remote_install(
         return 0
 
     install_remote_workflow(repo, install_source, delivery)
+    installed = describe_install_source(install_source)
     if delivery == "push":
-        print(f"pushed Backlog Atlas workflow to {repo}")
+        print(f"pushed Backlog Atlas workflow to {repo}; installs {installed}")
     else:
-        print(f"opened or updated Backlog Atlas install PR for {repo}")
+        print(
+            f"opened or updated Backlog Atlas install PR for {repo}; installs {installed}"
+        )
     return 0
