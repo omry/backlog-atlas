@@ -1,30 +1,38 @@
 # Standalone publication checklist
 
-> Temporary planning note. Delete this file once the tool is published as a standalone project.
+> Temporary pre-publication checklist. Delete this file once the package is
+> published and the release process is routine.
 
-High-level items to take this subproject to a published standalone project.
+Remaining items for publishing and operating Backlog Atlas as a standalone
+project.
 
 ## Identity & repo
 
 - [x] Pick a real name: Backlog Atlas (`backlog-atlas`).
-- [ ] Extract to its own git repo (history-preserving via `git filter-repo` from `subprojects/backlog-atlas/`, or seed a fresh repo from the current tree).
+- [x] Extract to its own repo: `https://github.com/omry/backlog-atlas`.
 - [x] Add `LICENSE` (MIT) and any attribution.
 
 ## Dependencies & decoupling
 
-- [ ] Re-evaluate the `omegaconf>=2.3` runtime dep in `pyproject.toml`. If it is only used for config loading, stdlib + PyYAML is lighter and avoids the optics of "omegaconf publishes a tool that depends on omegaconf". Keep only if it earns its place.
-- [ ] Audit for monorepo coupling: relative paths, references to omegaconf docs/AGENTS.md, shared nox sessions, fixtures from the parent test suite.
+- [x] Keep the `omegaconf>=2.3` runtime dependency. It is used for config
+  loading in `backlog_atlas/core.py`.
+- [ ] Do a final standalone-coupling audit for leftover environment assumptions,
+  docs references, generated build artifacts, and local-only setup notes.
 
 ## Tooling
 
-- [ ] Own lint/format/typecheck config (black, flake8, isort, pyrefly or mypy) plus either a `noxfile.py` or just `pyproject.toml` tool sections. The omegaconf nox sessions do not come along.
-- [ ] CI workflows: test matrix (Python 3.10–3.13), lint, and build wheel/sdist.
+- [ ] Add committed lint/format/typecheck config. Current local practice is
+  Black style plus `pyflakes`, but the repo does not yet define those checks.
+- [ ] Add lint to CI.
+- [x] CI runs tests on Python 3.10-3.13 and builds wheel/sdist.
 - [x] PyPI publishing workflow using Trusted Publishing from GitHub Releases.
-- [ ] Pin a release process: single version source of truth, changelog mechanism (reuse `news/` fragments or switch to `CHANGELOG.md`).
+- [ ] Add a changelog or release-note mechanism. `pyproject.toml` is currently
+  the version source of truth.
 
 ## Tests
 
-- [ ] Verify `tests/test_update_backlog.py` runs from a clean checkout with no omegaconf-repo assumptions. Add `pytest.ini`/`conftest.py` as needed, and document the `gh`-CLI mock strategy.
+- [ ] Verify tests from a fresh clone / clean checkout.
+- [ ] Document the `gh`-CLI mocking strategy used in tests.
 
 ## Docs
 
@@ -34,14 +42,15 @@ High-level items to take this subproject to a published standalone project.
 
 ## Dogfooding
 
-- [ ] Run `backlog-atlas install` on the new standalone repo itself. Best end-to-end validation of the install path.
+- [ ] Run `backlog-atlas install` on this repo itself and verify the generated
+  Pages dashboard from the `backlog-atlas` branch.
+
+## Publication
+
+- [ ] Confirm PyPI project availability/ownership for `backlog-atlas`.
+- [ ] Confirm PyPI Trusted Publisher is configured for repository
+  `omry/backlog-atlas`, workflow `publish.yml`, environment `pypi`.
 
 ## Cleanup
 
 - [ ] Delete this file (`STANDALONE-TODO.md`) once the tool is published.
-
-## Open questions to resolve early
-
-- Name + PyPI availability (blocks repo extraction and CI publish step).
-- Keep or drop the omegaconf runtime dep.
-- Where does development continue: new standalone repo from day one, or keep developing under `subprojects/` and mirror until cutover?
