@@ -593,9 +593,15 @@ def _stub_local_install(monkeypatch: pytest.MonkeyPatch) -> list[tuple[Any, ...]
     monkeypatch.setattr(
         install_repo, "is_on_default_branch", lambda target_root, vcs: None
     )
-    monkeypatch.setattr(install_sources, "installed_local_source_root", lambda: None)
-    monkeypatch.setattr(install_sources, "installed_version", lambda: "1.2.3")
+    _stub_installed_pypi(monkeypatch)
     return calls
+
+
+def _stub_installed_pypi(
+    monkeypatch: pytest.MonkeyPatch, version: str = "1.2.3"
+) -> None:
+    monkeypatch.setattr(install_sources, "installed_local_source_root", lambda: None)
+    monkeypatch.setattr(install_sources, "installed_version", lambda: version)
 
 
 def _make_backlog_atlas_checkout(tmp_path: Path) -> Path:
@@ -926,8 +932,7 @@ def test_install_force_skips_dirty_worktree_check(
     monkeypatch.setattr(install_repo, "detect_local_vcs", lambda target_root: "git")
     monkeypatch.setattr(install_repo, "detect_repo_from_sl", lambda cwd=None: "o/r")
     monkeypatch.setattr(install_repo, "detect_repo_from_git", lambda cwd=None: None)
-    monkeypatch.setattr(install_sources, "installed_local_source_root", lambda: None)
-    monkeypatch.setattr(install_sources, "installed_version", lambda: "1.2.3")
+    _stub_installed_pypi(monkeypatch)
     monkeypatch.setattr(
         install_local,
         "ensure_worktree_clean",
@@ -969,7 +974,7 @@ def test_install_local_dry_run_prints_plan_without_writing(
     monkeypatch.setattr(install_repo, "detect_local_vcs", lambda target_root: "git")
     monkeypatch.setattr(install_repo, "detect_repo_from_sl", lambda cwd=None: "o/r")
     monkeypatch.setattr(install_repo, "detect_repo_from_git", lambda cwd=None: None)
-    monkeypatch.setattr(install_sources, "installed_version", lambda: "1.2.3")
+    _stub_installed_pypi(monkeypatch)
     monkeypatch.setattr(
         install_local,
         "ensure_worktree_clean",
@@ -1013,7 +1018,7 @@ def test_install_local_dry_run_with_force_prints_plan_without_clean_requirement(
     monkeypatch.setattr(install_repo, "detect_local_vcs", lambda target_root: "git")
     monkeypatch.setattr(install_repo, "detect_repo_from_sl", lambda cwd=None: "o/r")
     monkeypatch.setattr(install_repo, "detect_repo_from_git", lambda cwd=None: None)
-    monkeypatch.setattr(install_sources, "installed_version", lambda: "1.2.3")
+    _stub_installed_pypi(monkeypatch)
     monkeypatch.setattr(
         install_local,
         "ensure_worktree_clean",
@@ -1495,7 +1500,7 @@ def test_install_remote_defaults_to_pr_delivery_for_github_url(
             }
         )
 
-    monkeypatch.setattr(install_sources, "installed_version", lambda: "1.2.3")
+    _stub_installed_pypi(monkeypatch)
     monkeypatch.setattr(install_github, "install_remote_workflow", fake_remote_install)
     sys.argv = [
         "backlog-atlas",
@@ -1537,7 +1542,7 @@ def test_install_remote_supports_push_delivery_for_ssh_url(
             }
         )
 
-    monkeypatch.setattr(install_sources, "installed_version", lambda: "1.2.3")
+    _stub_installed_pypi(monkeypatch)
     monkeypatch.setattr(install_github, "install_remote_workflow", fake_remote_install)
     sys.argv = [
         "backlog-atlas",
@@ -1565,7 +1570,7 @@ def test_install_remote_dry_run_verifies_repo_without_writing(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ):
     calls: list[list[str]] = []
-    monkeypatch.setattr(install_sources, "installed_version", lambda: "1.2.3")
+    _stub_installed_pypi(monkeypatch)
 
     def fake_run_gh(args: list[str], input_text: str | None = None) -> str:
         calls.append(args)
@@ -1615,7 +1620,7 @@ def test_install_remote_dry_run_verifies_repo_without_writing(
 def test_install_remote_dry_run_rejects_missing_write_access(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ):
-    monkeypatch.setattr(install_sources, "installed_version", lambda: "1.2.3")
+    _stub_installed_pypi(monkeypatch)
     monkeypatch.setattr(
         install_github,
         "run_gh",
@@ -1653,7 +1658,7 @@ def test_install_remote_dry_run_rejects_missing_write_access(
 def test_install_remote_dry_run_explains_missing_repo(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ):
-    monkeypatch.setattr(install_sources, "installed_version", lambda: "1.2.3")
+    _stub_installed_pypi(monkeypatch)
 
     def fake_run_gh(args: list[str], input_text: str | None = None) -> str:
         raise install_github.UserError(
@@ -1789,7 +1794,6 @@ def test_install_remote_pr_writes_workflow_and_metadata(
 ):
     calls: list[tuple[Any, ...]] = []
 
-    monkeypatch.setattr(install_sources, "installed_version", lambda: "1.2.3")
     monkeypatch.setattr(install_github, "github_default_branch", lambda repo: "develop")
     monkeypatch.setattr(
         install_github,

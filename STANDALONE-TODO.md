@@ -31,7 +31,7 @@ project.
 
 ## Tests
 
-- [ ] Verify tests from a fresh clone / clean checkout.
+- [x] Verify tests from a fresh clone / clean checkout.
 - [x] Document the `gh`-CLI mocking strategy used in tests.
 
 ## Docs
