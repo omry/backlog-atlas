@@ -18,6 +18,7 @@ This repo's backlog dashboard: <https://omry.github.io/backlog-atlas/>
   and release prep for this package.
 - [Design Note](./DESIGN.md) — how snapshots, diffs, and the update log fit
   together.
+- [Changelog](./CHANGELOG.md) — user-facing release notes.
 - [Standalone TODO](./STANDALONE-TODO.md) — temporary publication checklist.
 
 ## What It Produces

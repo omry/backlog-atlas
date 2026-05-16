@@ -27,8 +27,7 @@ project.
 - [ ] Add lint to CI.
 - [x] CI runs tests on Python 3.10-3.13 and builds wheel/sdist.
 - [x] PyPI publishing workflow using Trusted Publishing from GitHub Releases.
-- [ ] Add a changelog or release-note mechanism. `pyproject.toml` is currently
-  the version source of truth.
+- [x] Add a changelog or release-note mechanism.
 
 ## Tests
 

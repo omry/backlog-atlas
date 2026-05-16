@@ -211,10 +211,12 @@ Publishing is handled by GitHub Releases and PyPI Trusted Publishing.
 Before publishing:
 
 1. Bump `version` in `pyproject.toml`.
-2. Run `python -m pytest`.
-3. Run `python -m build --wheel --sdist`.
-4. Commit and push.
-5. Publish a GitHub Release.
+2. Move the pending notes in `CHANGELOG.md` under the new version.
+3. Run `python -m pytest`.
+4. Run `python -m build --wheel --sdist`.
+5. Commit and push.
+6. Publish a GitHub Release using the `CHANGELOG.md` entry as the release
+   notes source.
 
 PyPI must have a Trusted Publisher configured for:
 
