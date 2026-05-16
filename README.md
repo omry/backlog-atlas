@@ -74,6 +74,7 @@ Maintainers can install local check tools with:
 python -m pip install -e ".[dev]"
 python -m black --check backlog_atlas tests
 python -m pyflakes backlog_atlas tests
+python -m mypy
 python -m pytest
 ```
 

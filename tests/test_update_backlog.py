@@ -1999,15 +1999,12 @@ def test_bundled_wheel_initializes_backlog_branch_without_markdown(
         calls.append(("tree", repo, entries))
         return "tree-sha"
 
+    def fake_create_commit(repo: str, message: str, tree_sha: str) -> str:
+        calls.append(("commit", repo, message, tree_sha))
+        return "commit-sha"
+
     monkeypatch.setattr(install_github, "create_tree", fake_create_tree)
-    monkeypatch.setattr(
-        install_github,
-        "create_commit",
-        lambda repo, message, tree_sha: calls.append(
-            ("commit", repo, message, tree_sha)
-        )
-        or "commit-sha",
-    )
+    monkeypatch.setattr(install_github, "create_commit", fake_create_commit)
     monkeypatch.setattr(
         install_github,
         "create_branch_ref",

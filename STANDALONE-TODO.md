@@ -23,7 +23,7 @@ project.
 
 - [x] Add committed lint/format config and a development extra for local checks.
   Current local practice is Black style plus `pyflakes`.
-- [ ] Add type-checking config once the package is ready for typed CI.
+- [x] Add type-checking config and run it in CI.
 - [x] Add lint to CI.
 - [x] CI runs tests on Python 3.10-3.13 and builds wheel/sdist.
 - [x] PyPI publishing workflow using Trusted Publishing from GitHub Releases.

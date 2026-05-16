@@ -98,6 +98,12 @@ Run the current lightweight linter:
 python -m pyflakes backlog_atlas tests
 ```
 
+Run type checking:
+
+```sh
+python -m mypy
+```
+
 ## Local CLI Smoke Checks
 
 After the editable development install, check the CLI entry point:

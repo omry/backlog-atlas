@@ -9,7 +9,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from omegaconf import DictConfig, OmegaConf
 
@@ -69,7 +69,7 @@ class BacklogConfig:
 def load_config() -> DictConfig:
     defaults = OmegaConf.structured(BacklogConfig)
     if CONFIG_PATH.exists():
-        return OmegaConf.merge(defaults, OmegaConf.load(CONFIG_PATH))
+        return cast(DictConfig, OmegaConf.merge(defaults, OmegaConf.load(CONFIG_PATH)))
     return defaults
 
 
