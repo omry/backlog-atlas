@@ -206,7 +206,9 @@ wheel path.
 
 ## Publishing
 
-Publishing is handled by GitHub Releases and PyPI Trusted Publishing.
+Publishing is handled by GitHub Releases and PyPI Trusted Publishing. The
+release workflow reruns lint, formatting, tests, and package build checks before
+uploading distributions to PyPI.
 
 Before publishing:
 
