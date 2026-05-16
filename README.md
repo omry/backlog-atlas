@@ -8,6 +8,8 @@ issues and linked pull requests, and publishes the result to a dedicated
 `backlog-atlas` branch. The generated branch is machine-owned and can be served
 directly with GitHub Pages.
 
+This repo's backlog dashboard: <https://omry.github.io/backlog-atlas/>
+
 ## Documentation
 
 - [User Guide](./USER-GUIDE.md) — install Backlog Atlas on a repository, enable

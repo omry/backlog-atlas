@@ -42,8 +42,8 @@ project.
 
 ## Dogfooding
 
-- [ ] Run `backlog-atlas install` on this repo itself and verify the generated
-  Pages dashboard from the `backlog-atlas` branch.
+- [x] Run `backlog-atlas install` on this repo itself.
+- [ ] Verify the generated Pages dashboard from the `backlog-atlas` branch.
 
 ## Publication
 

@@ -1401,11 +1401,13 @@ def test_install_local_checkout_guides_default_branch_push(
     assert f"Checking working tree at {tmp_path}" in out
     assert "Working tree is clean" in out
     assert "Checked install workflow and metadata" in out
+    assert f"cd {tmp_path}" in out
+    assert "# Commit and push the install files." in out
     assert 'git commit -m "backlog: install Backlog Atlas 1.2.3 workflow"' in out
     assert "git push" in out
     assert "git push -u origin HEAD" not in out
-    assert "the install commit will be on the default branch" in out
-    assert "after it lands on the default branch" in out
+    assert "gh workflow run 'Update Backlog Atlas' --repo o/r" in out
+    assert "https://github.com/o/r/settings/pages" in out
 
 
 def test_install_local_checkout_guides_pr_from_non_default_branch(
@@ -1426,8 +1428,8 @@ def test_install_local_checkout_guides_pr_from_non_default_branch(
     out = capsys.readouterr().out
     assert 'git commit -m "backlog: install Backlog Atlas 1.2.3 workflow"' in out
     assert "git push -u origin HEAD" in out
-    assert "open or merge a PR for the install commit" in out
-    assert "after it lands on the default branch" in out
+    assert "# Open or merge a PR for this install commit before continuing." in out
+    assert "gh workflow run 'Update Backlog Atlas' --repo o/r" in out
 
 
 def test_install_remote_defaults_to_pr_delivery_for_github_url(

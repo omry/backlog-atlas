@@ -57,24 +57,18 @@ def print_local_install_next_steps(
     print()
     print("Next steps:")
     on_default = repo.is_on_default_branch(target_root, vcs)
-    print(f"  - from {target_root}, run:")
+    print(f"cd {target_root}")
+    print("# Commit and push the install files.")
     for command in local_install_commands(vcs, on_default, install_source):
-        print(f"      {command}")
-    if on_default is True:
-        print("  - the install commit will be on the default branch")
-    elif on_default is False:
-        print("  - open or merge a PR for the install commit")
-    else:
-        print("  - use a PR for the install commit if this is not the default branch")
-    print(
-        "  - after it lands on the default branch, trigger once: "
-        f"gh workflow run 'Update Backlog Atlas' --repo {repo_name}"
-    )
-    print(f"    (the workflow creates the {BACKLOG_BRANCH} branch if needed)")
-    print(
-        f"  - enable Pages: https://github.com/{repo_name}/settings/pages "
-        f"(branch: {BACKLOG_BRANCH}, folder: /)"
-    )
+        print(command)
+    if on_default is False:
+        print("# Open or merge a PR for this install commit before continuing.")
+    elif on_default is None:
+        print("# If this is not the default branch, merge the install commit first.")
+    print("# Trigger the first Backlog Atlas run.")
+    print(f"gh workflow run 'Update Backlog Atlas' --repo {repo_name}")
+    print("# Enable Pages from the backlog-atlas branch, folder /.")
+    print(f"# https://github.com/{repo_name}/settings/pages")
 
 
 def print_local_install_plan(
