@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -7,6 +8,30 @@ from . import artifacts, github, repo
 from .commands import run_command
 from .constants import BACKLOG_BRANCH
 from .models import InstallSource, describe_install_source, install_commit_message
+
+ANSI_RESET = "\033[0m"
+ANSI_BOLD = "\033[1m"
+ANSI_DIM = "\033[2m"
+ANSI_COMMAND = "\033[36m"
+ANSI_URL = "\033[36;4m"
+
+
+def color_enabled() -> bool:
+    if "NO_COLOR" in os.environ:
+        return False
+    if os.environ.get("CLICOLOR_FORCE") not in {None, "", "0"}:
+        return True
+    if os.environ.get("FORCE_COLOR") not in {None, "", "0"}:
+        return True
+    if os.environ.get("CLICOLOR") == "0":
+        return False
+    return sys.stdout.isatty()
+
+
+def style(text: str, ansi_code: str, enabled: bool) -> str:
+    if not enabled:
+        return text
+    return f"{ansi_code}{text}{ANSI_RESET}"
 
 
 def ensure_worktree_clean(target_root: Path, vcs: str) -> bool:
@@ -54,21 +79,50 @@ def local_install_commands(
 def print_local_install_next_steps(
     repo_name: str, target_root: Path, vcs: str, install_source: InstallSource
 ) -> None:
+    color = color_enabled()
     print()
-    print("Next steps:")
+    print(style("Next steps:", ANSI_BOLD, color))
     on_default = repo.is_on_default_branch(target_root, vcs)
-    print(f"cd {target_root}")
-    print("# Commit and push the install files.")
+    if Path.cwd().resolve() != target_root.resolve():
+        print(style(f"cd {target_root}", ANSI_COMMAND, color))
+        print()
+    print(style("# Commit and push the install files.", ANSI_DIM, color))
     for command in local_install_commands(vcs, on_default, install_source):
-        print(command)
+        print(style(command, ANSI_COMMAND, color))
+    print()
     if on_default is False:
-        print("# Open or merge a PR for this install commit before continuing.")
+        print(
+            style(
+                "# Open or merge a PR for this install commit before continuing.",
+                ANSI_DIM,
+                color,
+            )
+        )
+        print()
     elif on_default is None:
-        print("# If this is not the default branch, merge the install commit first.")
-    print("# Trigger the first Backlog Atlas run.")
-    print(f"gh workflow run 'Update Backlog Atlas' --repo {repo_name}")
-    print("# Enable Pages from the backlog-atlas branch, folder /.")
-    print(f"# https://github.com/{repo_name}/settings/pages")
+        print(
+            style(
+                "# If this is not the default branch, merge the install commit first.",
+                ANSI_DIM,
+                color,
+            )
+        )
+        print()
+    print(style("# Trigger the first Backlog Atlas run.", ANSI_DIM, color))
+    print(
+        style(
+            f"gh workflow run 'Update Backlog Atlas' --repo {repo_name}",
+            ANSI_COMMAND,
+            color,
+        )
+    )
+    print()
+    print(
+        style(
+            "# Enable Pages from the backlog-atlas branch, folder /.", ANSI_DIM, color
+        )
+    )
+    print(style(f"# https://github.com/{repo_name}/settings/pages", ANSI_URL, color))
 
 
 def print_local_install_plan(
