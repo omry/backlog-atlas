@@ -134,8 +134,8 @@ development tools with `python -m pip install -e ".[dev]"`, then:
 
 ## Environment and hooks
 
-- Run commands in the `omegaconf+hydra` conda environment by default until this
-  repo has its own documented environment.
+- Run commands from an activated environment with the package installed in
+  editable development mode, as documented in `MAINTAINERS.md`.
 - When validating contributor setup, shell initialization, or hook behavior,
   verify it from the same environment a developer would actually use, such as a
   normal shell session or `sl commit`, not only from a temporary sandbox-only

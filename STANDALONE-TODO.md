@@ -16,7 +16,7 @@ project.
 
 - [x] Keep the `omegaconf>=2.3` runtime dependency. It is used for config
   loading in `backlog_atlas/core.py`.
-- [ ] Do a final standalone-coupling audit for leftover environment assumptions,
+- [x] Do a final standalone-coupling audit for leftover environment assumptions,
   docs references, generated build artifacts, and local-only setup notes.
 
 ## Tooling
