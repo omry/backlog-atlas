@@ -34,16 +34,10 @@ conda create -n backlog-atlas python=3.12
 conda activate backlog-atlas
 ```
 
-Then install the package in editable mode:
+Then install the package in editable mode with the local development tools:
 
 ```sh
-python -m pip install -e .
-```
-
-Install development tools used by the local checks:
-
-```sh
-python -m pip install pytest build
+python -m pip install -e ".[dev]"
 ```
 
 Install and authenticate the GitHub CLI before running commands that read
@@ -71,9 +65,25 @@ python -m pytest
 The full suite currently collects the same test file, but keep running both
 commands so the habit stays correct as the repo grows.
 
+## Linting and Formatting
+
+The committed tool config lives in `pyproject.toml`.
+
+Check formatting:
+
+```sh
+python -m black --check backlog_atlas tests
+```
+
+Run the current lightweight linter:
+
+```sh
+python -m pyflakes backlog_atlas tests
+```
+
 ## Local CLI Smoke Checks
 
-After `python -m pip install -e .`, check the CLI entry point:
+After the editable development install, check the CLI entry point:
 
 ```sh
 backlog-atlas --help

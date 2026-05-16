@@ -21,8 +21,9 @@ project.
 
 ## Tooling
 
-- [ ] Add committed lint/format/typecheck config. Current local practice is
-  Black style plus `pyflakes`, but the repo does not yet define those checks.
+- [x] Add committed lint/format config and a development extra for local checks.
+  Current local practice is Black style plus `pyflakes`.
+- [ ] Add type-checking config once the package is ready for typed CI.
 - [ ] Add lint to CI.
 - [x] CI runs tests on Python 3.10-3.13 and builds wheel/sdist.
 - [x] PyPI publishing workflow using Trusted Publishing from GitHub Releases.

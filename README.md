@@ -63,6 +63,19 @@ backlog-atlas dump-web --output PATH
 backlog-atlas update [flags]
 ```
 
+## Development Checks
+
+Maintainers can install local check tools with:
+
+```sh
+python -m pip install -e ".[dev]"
+python -m black --check backlog_atlas tests
+python -m pyflakes backlog_atlas tests
+python -m pytest
+```
+
+See the [Maintainer Guide](./MAINTAINERS.md) for the full development workflow.
+
 ## License
 
 MIT.

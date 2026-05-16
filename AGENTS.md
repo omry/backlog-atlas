@@ -121,10 +121,13 @@ When asked to create a reproduction for an issue, place files under `temp/`:
 
 ## Linting and formatting
 
-This standalone repo does not yet have a full lint configuration. Until it does:
+The committed local check configuration lives in `pyproject.toml`. Install the
+development tools with `python -m pip install -e ".[dev]"`, then:
 
 - Keep Python formatted with `black` style.
 - Keep imports compatible with `isort`'s default style.
+- Run `python -m black --check backlog_atlas tests` for formatting.
+- Run `python -m pyflakes backlog_atlas tests` for lightweight linting.
 - Run `pytest tests/test_update_backlog.py` after code changes.
 - If adding lint or type-check tooling, document the commands in `README.md` and
   update this file.
