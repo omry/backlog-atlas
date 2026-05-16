@@ -13,6 +13,7 @@ from typing import Any
 
 from omegaconf import DictConfig, OmegaConf
 
+from .errors import UserError
 from .install.cli import (
     add_install_args,
     add_uninstall_args,
@@ -1024,7 +1025,10 @@ def build_commit_message(
 def _add_update_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--repo",
-        help="GitHub repo in owner/name format. Defaults to Sapling/Git remote detection.",
+        help=(
+            "Repository URL. GitHub URLs are supported today; owner/name is "
+            "accepted as GitHub shorthand. Defaults to Git or Sapling remote detection."
+        ),
     )
     parser.add_argument(
         "--dry-run",
@@ -1245,14 +1249,18 @@ def main() -> int:
 
     args = parser.parse_args()
 
-    if args.cmd == "update":
-        return run_update(args)
-    if args.cmd == "install":
-        return run_install(args)
-    if args.cmd == "uninstall":
-        return run_uninstall(args)
-    if args.cmd == "dump-web":
-        return run_dump_web(args)
+    try:
+        if args.cmd == "update":
+            return run_update(args)
+        if args.cmd == "install":
+            return run_install(args)
+        if args.cmd == "uninstall":
+            return run_uninstall(args)
+        if args.cmd == "dump-web":
+            return run_dump_web(args)
+    except UserError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return e.exit_code
     parser.print_help()
     return 2
 

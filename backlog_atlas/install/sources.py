@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import json
 import re
 import sys
 import tempfile
-from importlib.metadata import PackageNotFoundError, version as package_version
+from importlib.metadata import (
+    PackageNotFoundError,
+    distribution as package_distribution,
+    version as package_version,
+)
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
+from ..errors import UserError
 from .commands import run_command
 from .constants import BUNDLED_PACKAGE_DIR
 from .models import InstallSource
@@ -18,10 +25,41 @@ def installed_version() -> str:
         return "0.0.0+unknown"
 
 
+def installed_local_source_root() -> Path | None:
+    try:
+        dist = package_distribution("backlog-atlas")
+    except PackageNotFoundError:
+        return None
+
+    direct_url = dist.read_text("direct_url.json")
+    if not direct_url:
+        return None
+    try:
+        data = json.loads(direct_url)
+    except json.JSONDecodeError:
+        return None
+    dir_info = data.get("dir_info")
+    if not isinstance(dir_info, dict):
+        return None
+    url = data.get("url")
+    if not isinstance(url, str):
+        return None
+    parsed = urlparse(url)
+    if parsed.scheme != "file":
+        return None
+    source_root = Path(unquote(parsed.path))
+    if not source_root.exists():
+        raise UserError(
+            f"backlog-atlas was installed from local source {source_root}, "
+            "but that path no longer exists"
+        )
+    return source_root
+
+
 def package_version_from_checkout(source_root: Path) -> str:
     pyproject_path = source_root / "pyproject.toml"
     if not pyproject_path.exists():
-        raise RuntimeError(f"{source_root} is not a Python package checkout")
+        raise UserError(f"{source_root} is not a Python package checkout")
     in_project_section = False
     for line in pyproject_path.read_text(encoding="utf-8").splitlines():
         text = line.strip()
@@ -34,34 +72,55 @@ def package_version_from_checkout(source_root: Path) -> str:
             match = re.match(r"""version\s*=\s*["']([^"']+)["']""", text)
             if match:
                 return match.group(1)
-    raise RuntimeError(f"{pyproject_path} does not define project.version")
+    raise UserError(f"{pyproject_path} does not define project.version")
 
 
 def build_local_wheel(source_root: Path) -> tuple[str, bytes]:
     with tempfile.TemporaryDirectory(prefix="backlog-atlas-wheel-") as tmp:
         out_dir = Path(tmp)
-        run_command(
-            [
-                sys.executable,
-                "-m",
-                "build",
-                "--wheel",
-                "--no-isolation",
-                "--outdir",
-                str(out_dir),
-            ],
-            cwd=source_root,
-        )
+        try:
+            run_command(
+                [
+                    sys.executable,
+                    "-m",
+                    "build",
+                    "--wheel",
+                    "--no-isolation",
+                    "--outdir",
+                    str(out_dir),
+                ],
+                cwd=source_root,
+            )
+        except UserError as e:
+            details = str(e)
+            if "No module named build" in details:
+                raise UserError(
+                    "backlog-atlas is installed from a local checkout, so install "
+                    "needs to build a bundled wheel from that checkout. This "
+                    "Python environment is missing the 'build' package; install "
+                    f"it with: {sys.executable} -m pip install build"
+                ) from e
+            raise
         wheels = sorted(out_dir.glob("*.whl"))
         if len(wheels) != 1:
-            raise RuntimeError(f"expected one built wheel, found {len(wheels)}")
+            raise UserError(f"expected one built wheel, found {len(wheels)}")
         wheel = wheels[0]
         return wheel.name, wheel.read_bytes()
 
 
-def resolve_local_checkout_install_source(source_root: Path) -> InstallSource:
+def resolve_local_checkout_install_source(
+    source_root: Path, build_wheel: bool = True
+) -> InstallSource:
     source_root = source_root.resolve()
     version = package_version_from_checkout(source_root)
+    if not build_wheel:
+        bundled_path = f"{BUNDLED_PACKAGE_DIR}/<built-wheel>"
+        return InstallSource(
+            pip_spec=f"backlog-atlas-branch/{bundled_path}",
+            version=version,
+            source_type="bundled-wheel",
+            bundled_wheel_path=bundled_path,
+        )
     wheel_name, wheel_content = build_local_wheel(source_root)
     bundled_path = f"{BUNDLED_PACKAGE_DIR}/{wheel_name}"
     return InstallSource(
@@ -78,11 +137,18 @@ def parse_pinned_backlog_atlas_version(install_from: str) -> str | None:
     return match.group(1) if match else None
 
 
-def resolve_install_source(install_from: str | None) -> InstallSource:
+def resolve_install_source(
+    install_from: str | None, dry_run: bool = False
+) -> InstallSource:
     if not install_from or install_from.strip() == "backlog-atlas":
+        source_root = installed_local_source_root()
+        if source_root is not None:
+            return resolve_local_checkout_install_source(
+                source_root, build_wheel=not dry_run
+            )
         version = installed_version()
         if version == "0.0.0+unknown":
-            raise RuntimeError(
+            raise UserError(
                 "could not determine installed backlog-atlas version to pin"
             )
         return InstallSource(
@@ -102,14 +168,16 @@ def resolve_install_source(install_from: str | None) -> InstallSource:
 
     source_path = Path(text).expanduser()
     if source_path.exists():
-        return resolve_local_checkout_install_source(source_path)
+        return resolve_local_checkout_install_source(
+            source_path, build_wheel=not dry_run
+        )
 
     if text.startswith("backlog-atlas"):
-        raise RuntimeError(
+        raise UserError(
             "PyPI installs must be pinned exactly, for example backlog-atlas==1.2.3"
         )
 
-    raise RuntimeError(
+    raise UserError(
         "--install-from must be a pinned PyPI spec like backlog-atlas==1.2.3 "
         "or a local Backlog Atlas checkout path"
     )

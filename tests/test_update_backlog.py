@@ -538,18 +538,22 @@ def test_dry_run_does_not_write_updates_jsonl(
 def _stub_local_install(monkeypatch: pytest.MonkeyPatch) -> list[tuple[Any, ...]]:
     calls: list[tuple[Any, ...]] = []
 
-    def fake_clean(target_root: Path, vcs: str) -> None:
+    def fake_clean(target_root: Path, vcs: str) -> bool:
         calls.append(("clean", target_root, vcs))
+        return True
 
     def fake_add(target_root: Path, artifact_paths: list[Path], vcs: str) -> None:
         calls.append(("add", target_root, artifact_paths, vcs))
 
     monkeypatch.setattr(install_repo, "detect_local_vcs", lambda target_root: "git")
+    monkeypatch.setattr(install_repo, "detect_repo_from_sl", lambda cwd=None: "o/r")
+    monkeypatch.setattr(install_repo, "detect_repo_from_git", lambda cwd=None: None)
     monkeypatch.setattr(install_local, "ensure_worktree_clean", fake_clean)
     monkeypatch.setattr(install_local, "add_local_install_files", fake_add)
     monkeypatch.setattr(
         install_repo, "is_on_default_branch", lambda target_root, vcs: None
     )
+    monkeypatch.setattr(install_sources, "installed_local_source_root", lambda: None)
     monkeypatch.setattr(install_sources, "installed_version", lambda: "1.2.3")
     return calls
 
@@ -596,6 +600,64 @@ def test_workflow_template_substitutes_install_source():
     assert "${{ github.event.action }}" in out
 
 
+def test_install_help_prefers_repository_url(capsys: pytest.CaptureFixture[str]):
+    sys.argv = ["backlog-atlas", "install", "--help"]
+
+    with pytest.raises(SystemExit) as exc:
+        ub.main()
+
+    assert exc.value.code == 0
+    out = capsys.readouterr().out
+    normalized = " ".join(out.split())
+    assert "Repository URL" in normalized
+    assert "owner/name is accepted as GitHub shorthand" in normalized
+    assert "Installs remotely" in normalized
+    assert "cannot be combined with --target-root" in normalized
+    assert "Target working tree root for local install" in normalized
+    assert "Cannot be combined with --repo" in normalized
+    assert "GitHub repo owner/name" not in normalized
+
+
+def test_install_rejects_repo_with_target_root(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+):
+    sys.argv = [
+        "backlog-atlas",
+        "install",
+        "--repo",
+        "https://github.com/o/r",
+        "--target-root",
+        str(tmp_path),
+    ]
+
+    rc = ub.main()
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "--repo and --target-root are mutually exclusive" in err
+    assert "use --repo for remote install" in err
+    assert "--target-root for local checkout install" in err
+
+
+def test_install_rejects_unsupported_repo_value(
+    capsys: pytest.CaptureFixture[str],
+):
+    sys.argv = [
+        "backlog-atlas",
+        "install",
+        "--repo",
+        "https://example.com/o/r",
+    ]
+
+    rc = ub.main()
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "unsupported --repo value" in err
+    assert "https://github.com/owner/name" in err
+    assert "owner/name" in err
+
+
 def test_install_writes_workflow_when_missing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -603,8 +665,6 @@ def test_install_writes_workflow_when_missing(
     sys.argv = [
         "backlog-atlas",
         "install",
-        "--repo",
-        "o/r",
         "--target-root",
         str(tmp_path),
         "--install-from",
@@ -641,8 +701,6 @@ def test_install_defaults_to_pypi_package(
     sys.argv = [
         "backlog-atlas",
         "install",
-        "--repo",
-        "o/r",
         "--target-root",
         str(tmp_path),
     ]
@@ -668,8 +726,6 @@ def test_install_leaves_unmatched_existing_workflow_and_metadata_unchanged(
     sys.argv = [
         "backlog-atlas",
         "install",
-        "--repo",
-        "o/r",
         "--target-root",
         str(tmp_path),
     ]
@@ -695,8 +751,6 @@ def test_install_writes_metadata_when_existing_workflow_matches(
     sys.argv = [
         "backlog-atlas",
         "install",
-        "--repo",
-        "o/r",
         "--target-root",
         str(tmp_path),
     ]
@@ -720,8 +774,6 @@ def test_install_updates_managed_existing_workflow_and_metadata(
     sys.argv = [
         "backlog-atlas",
         "install",
-        "--repo",
-        "o/r",
         "--target-root",
         str(tmp_path),
     ]
@@ -755,22 +807,95 @@ def test_install_local_checkout_detects_repo_and_adds_workflow(
     ]
 
 
+def test_install_dirty_worktree_returns_error_without_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    monkeypatch.setattr(install_repo, "detect_local_vcs", lambda target_root: "git")
+    monkeypatch.setattr(
+        install_local,
+        "run_command",
+        lambda args, cwd=None: " M existing.py\n",
+    )
+    monkeypatch.setattr(
+        install_github,
+        "ensure_backlog_branch_with_bundle",
+        lambda repo, install_source: pytest.fail("should not touch GitHub"),
+    )
+
+    rc = install_local.run_local_install(
+        "o/r",
+        tmp_path,
+        InstallSource(
+            pip_spec="backlog-atlas==1.2.3",
+            version="1.2.3",
+            source_type="pypi",
+        ),
+    )
+
+    assert rc == 1
+    assert "has uncommitted changes" in capsys.readouterr().err
+    assert not (tmp_path / ".github").exists()
+
+
+def test_install_local_dry_run_prints_plan_without_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    monkeypatch.setattr(install_repo, "detect_local_vcs", lambda target_root: "git")
+    monkeypatch.setattr(install_repo, "detect_repo_from_sl", lambda cwd=None: "o/r")
+    monkeypatch.setattr(install_repo, "detect_repo_from_git", lambda cwd=None: None)
+    monkeypatch.setattr(install_sources, "installed_version", lambda: "1.2.3")
+    monkeypatch.setattr(
+        install_local,
+        "ensure_worktree_clean",
+        lambda target_root, vcs: pytest.fail("should not check worktree cleanliness"),
+    )
+    monkeypatch.setattr(
+        install_local,
+        "add_local_install_files",
+        lambda target_root, artifact_paths, vcs: pytest.fail("should not add files"),
+    )
+    monkeypatch.setattr(
+        install_github,
+        "ensure_backlog_branch_with_bundle",
+        lambda repo, install_source: pytest.fail("should not touch GitHub"),
+    )
+
+    sys.argv = [
+        "backlog-atlas",
+        "install",
+        "--target-root",
+        str(tmp_path),
+        "--dry-run",
+    ]
+
+    rc = ub.main()
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Dry run: would install Backlog Atlas locally" in out
+    assert "No files would be written and no GitHub calls would be made." in out
+    assert "Target repo: o/r" in out
+    assert "Workflow would install Backlog Atlas from: backlog-atlas==1.2.3" in out
+    assert str(tmp_path / ".github" / "workflows" / "update-backlog-atlas.yml") in out
+    assert str(tmp_path / ".github" / "backlog-atlas.json") in out
+    assert not (tmp_path / ".github").exists()
+
+
 def test_install_local_checkout_rejects_delivery(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ):
     _stub_local_install(monkeypatch)
     sys.argv = [
         "backlog-atlas",
         "install",
-        "--repo",
-        "o/r",
         "--target-root",
         str(tmp_path),
         "--delivery",
         "push",
     ]
-    with pytest.raises(RuntimeError, match="--delivery only applies to remote"):
-        ub.main()
+    rc = ub.main()
+    assert rc == 1
+    assert "--delivery only applies to remote" in capsys.readouterr().err
 
 
 def test_resolve_install_source_from_local_checkout_builds_bundled_wheel(
@@ -797,9 +922,117 @@ def test_resolve_install_source_from_local_checkout_builds_bundled_wheel(
     )
 
 
-def test_install_rejects_floating_install_source():
-    with pytest.raises(RuntimeError, match="must be a pinned PyPI spec"):
-        install_sources.resolve_install_source("git+https://example.com/x.git@main")
+def test_build_local_wheel_explains_missing_build_package(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    source_root = _make_backlog_atlas_checkout(tmp_path)
+
+    def fake_run_command(args: list[str], cwd: Path | None = None) -> str:
+        raise install_sources.UserError(
+            f"{args[0]} -m build failed: {args[0]}: No module named build"
+        )
+
+    monkeypatch.setattr(install_sources, "run_command", fake_run_command)
+
+    with pytest.raises(install_sources.UserError) as exc:
+        install_sources.build_local_wheel(source_root)
+
+    message = str(exc.value)
+    assert "installed from a local checkout" in message
+    assert "needs to build a bundled wheel" in message
+    assert "missing the 'build' package" in message
+    assert "-m pip install build" in message
+
+
+def test_installed_local_source_root_reads_direct_url(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+
+    class FakeDistribution:
+        def read_text(self, name: str) -> str | None:
+            assert name == "direct_url.json"
+            return json.dumps(
+                {
+                    "dir_info": {"editable": True},
+                    "url": source_root.as_uri(),
+                }
+            )
+
+    monkeypatch.setattr(
+        install_sources,
+        "package_distribution",
+        lambda name: FakeDistribution(),
+    )
+
+    assert install_sources.installed_local_source_root() == source_root
+
+
+def test_resolve_install_source_defaults_to_installed_local_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    source_root = _make_backlog_atlas_checkout(tmp_path)
+    monkeypatch.setattr(
+        install_sources, "installed_local_source_root", lambda: source_root
+    )
+    monkeypatch.setattr(
+        install_sources,
+        "build_local_wheel",
+        lambda path: ("backlog_atlas-2.3.4-py3-none-any.whl", b"wheel bytes"),
+    )
+
+    source = install_sources.resolve_install_source(None)
+
+    assert source == InstallSource(
+        pip_spec=(
+            "backlog-atlas-branch/.backlog-atlas/packages/"
+            "backlog_atlas-2.3.4-py3-none-any.whl"
+        ),
+        version="2.3.4",
+        source_type="bundled-wheel",
+        bundled_wheel_path=".backlog-atlas/packages/backlog_atlas-2.3.4-py3-none-any.whl",
+        bundled_wheel_content=b"wheel bytes",
+    )
+
+
+def test_resolve_install_source_local_source_dry_run_does_not_build_wheel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    source_root = _make_backlog_atlas_checkout(tmp_path)
+    monkeypatch.setattr(
+        install_sources, "installed_local_source_root", lambda: source_root
+    )
+    monkeypatch.setattr(
+        install_sources,
+        "build_local_wheel",
+        lambda path: pytest.fail("should not build wheel for dry run"),
+    )
+
+    source = install_sources.resolve_install_source(None, dry_run=True)
+
+    assert source == InstallSource(
+        pip_spec="backlog-atlas-branch/.backlog-atlas/packages/<built-wheel>",
+        version="2.3.4",
+        source_type="bundled-wheel",
+        bundled_wheel_path=".backlog-atlas/packages/<built-wheel>",
+    )
+
+
+def test_install_rejects_floating_install_source(
+    capsys: pytest.CaptureFixture[str],
+):
+    sys.argv = [
+        "backlog-atlas",
+        "install",
+        "--repo",
+        "o/r",
+        "--install-from",
+        "git+https://example.com/x.git@main",
+    ]
+    rc = ub.main()
+    assert rc == 1
+    assert "must be a pinned PyPI spec" in capsys.readouterr().err
 
 
 def test_install_local_target_bundles_local_source(
@@ -822,8 +1055,6 @@ def test_install_local_target_bundles_local_source(
     sys.argv = [
         "backlog-atlas",
         "install",
-        "--repo",
-        "o/r",
         "--target-root",
         str(target_root),
         "--install-from",
@@ -853,8 +1084,6 @@ def test_install_local_checkout_guides_default_branch_push(
     sys.argv = [
         "backlog-atlas",
         "install",
-        "--repo",
-        "o/r",
         "--target-root",
         str(tmp_path),
     ]
@@ -878,8 +1107,6 @@ def test_install_local_checkout_guides_pr_from_non_default_branch(
     sys.argv = [
         "backlog-atlas",
         "install",
-        "--repo",
-        "o/r",
         "--target-root",
         str(tmp_path),
     ]
@@ -968,6 +1195,178 @@ def test_install_remote_supports_push_delivery_for_ssh_url(
         "source_type": "pypi",
         "delivery": "push",
     }
+
+
+def test_install_remote_dry_run_verifies_repo_without_writing(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    calls: list[list[str]] = []
+    monkeypatch.setattr(install_sources, "installed_version", lambda: "1.2.3")
+
+    def fake_run_gh(args: list[str], input_text: str | None = None) -> str:
+        calls.append(args)
+        assert input_text is None
+        assert args == ["api", "repos/o/r"]
+        return json.dumps(
+            {
+                "default_branch": "main",
+                "permissions": {"admin": False, "maintain": False, "push": True},
+            }
+        )
+
+    monkeypatch.setattr(install_github, "run_gh", fake_run_gh)
+    monkeypatch.setattr(
+        install_github,
+        "install_remote_workflow",
+        lambda repo, install_source, delivery: pytest.fail(
+            "should not install remotely"
+        ),
+    )
+
+    sys.argv = [
+        "backlog-atlas",
+        "install",
+        "--repo",
+        "https://github.com/o/r",
+        "--dry-run",
+    ]
+
+    rc = ub.main()
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert calls == [["api", "repos/o/r"]]
+    assert "Dry run: would install Backlog Atlas remotely" in out
+    assert "Verified GitHub repository exists and current gh auth can write." in out
+    assert "No files, branches, commits, or pull requests would be created." in out
+    assert "Target repo: o/r" in out
+    assert "Default branch: main" in out
+    assert "Delivery: pull request" in out
+    assert "Workflow would install Backlog Atlas from: backlog-atlas==1.2.3" in out
+    assert "Would create or update backlog-atlas-install from main" in out
+    assert ".github/workflows/update-backlog-atlas.yml" in out
+    assert ".github/backlog-atlas.json" in out
+
+
+def test_install_remote_dry_run_rejects_missing_write_access(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    monkeypatch.setattr(install_sources, "installed_version", lambda: "1.2.3")
+    monkeypatch.setattr(
+        install_github,
+        "run_gh",
+        lambda args, input_text=None: json.dumps(
+            {
+                "default_branch": "main",
+                "permissions": {"admin": False, "maintain": False, "push": False},
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        install_github,
+        "install_remote_workflow",
+        lambda repo, install_source, delivery: pytest.fail(
+            "should not install remotely"
+        ),
+    )
+
+    sys.argv = [
+        "backlog-atlas",
+        "install",
+        "--repo",
+        "https://github.com/o/r",
+        "--dry-run",
+    ]
+
+    rc = ub.main()
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "o/r exists" in err
+    assert "does not appear to have write access" in err
+
+
+def test_install_remote_dry_run_explains_missing_repo(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    monkeypatch.setattr(install_sources, "installed_version", lambda: "1.2.3")
+
+    def fake_run_gh(args: list[str], input_text: str | None = None) -> str:
+        raise install_github.UserError(
+            "gh api repos/owner/name failed: gh: Not Found (HTTP 404)"
+        )
+
+    monkeypatch.setattr(install_github, "run_gh", fake_run_gh)
+    monkeypatch.setattr(
+        install_github,
+        "install_remote_workflow",
+        lambda repo, install_source, delivery: pytest.fail(
+            "should not install remotely"
+        ),
+    )
+
+    sys.argv = [
+        "backlog-atlas",
+        "install",
+        "--repo",
+        "https://github.com/owner/name",
+        "--dry-run",
+    ]
+
+    rc = ub.main()
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "GitHub could not find owner/name" in err
+    assert "Check the repository URL" in err
+    assert "current gh authentication can access it" in err
+
+
+def test_install_remote_dry_run_local_source_does_not_build_wheel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    source_root = _make_backlog_atlas_checkout(tmp_path)
+    monkeypatch.setattr(
+        install_sources,
+        "build_local_wheel",
+        lambda source_root: pytest.fail("should not build wheel for dry run"),
+    )
+    monkeypatch.setattr(
+        install_github,
+        "run_gh",
+        lambda args, input_text=None: json.dumps(
+            {
+                "default_branch": "main",
+                "permissions": {"admin": False, "maintain": False, "push": True},
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        install_github,
+        "install_remote_workflow",
+        lambda repo, install_source, delivery: pytest.fail(
+            "should not install remotely"
+        ),
+    )
+
+    sys.argv = [
+        "backlog-atlas",
+        "install",
+        "--repo",
+        "https://github.com/o/r",
+        "--install-from",
+        str(source_root),
+        "--dry-run",
+    ]
+
+    rc = ub.main()
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Workflow would install Backlog Atlas from: " in out
+    assert "backlog-atlas-branch/.backlog-atlas/packages/<built-wheel>" in out
+    assert "Would build and upload bundled wheel to backlog-atlas" in out
+    assert ".backlog-atlas/packages/<built-wheel>" in out
 
 
 def test_install_remote_bundles_local_source(

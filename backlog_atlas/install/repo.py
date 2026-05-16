@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from ..errors import UserError
 from .commands import try_command
 
 
@@ -60,13 +61,20 @@ def detect_repo_from_git(cwd: Path | None = None) -> str | None:
 def resolve_repo(explicit_repo: str | None, cwd: Path | None = None) -> str:
     if explicit_repo:
         repo = normalize_github_repo(explicit_repo)
+        if repo:
+            return repo
+        raise UserError(
+            "unsupported --repo value; expected a GitHub repository URL like "
+            "https://github.com/owner/name or the shorthand owner/name"
+        )
     else:
         repo = detect_repo_from_sl(cwd) or detect_repo_from_git(cwd)
     if repo:
         return repo
-    raise RuntimeError(
-        "could not determine GitHub repo; pass --repo owner/name or a GitHub URL, "
-        "or ensure Sapling/Git remotes point at GitHub"
+    raise UserError(
+        "could not determine repository; pass --repo https://github.com/owner/name "
+        "(owner/name is accepted as GitHub shorthand), or ensure Git or Sapling "
+        "remotes point at GitHub"
     )
 
 
@@ -98,8 +106,8 @@ def detect_local_vcs(target_root: Path) -> str:
         if candidate.exists() and candidate.resolve() == target_root.resolve():
             return "git"
 
-    raise RuntimeError(
-        f"{target_root} is not a Sapling or Git working tree; run install inside "
+    raise UserError(
+        f"{target_root} is not a Git or Sapling working tree; run install inside "
         "a checkout or pass --repo for remote installation"
     )
 

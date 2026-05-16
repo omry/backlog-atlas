@@ -79,6 +79,7 @@ tests and package tooling.
 ## Documentation map
 
 - Main README: [`README.md`](./README.md)
+- User guide: [`USER-GUIDE.md`](./USER-GUIDE.md)
 - Product strategy: [`PRODUCT-STRATEGY.md`](./PRODUCT-STRATEGY.md)
 - Standalone publication checklist: [`STANDALONE-TODO.md`](./STANDALONE-TODO.md)
 - CLI and core logic: [`backlog_atlas/__init__.py`](./backlog_atlas/__init__.py)

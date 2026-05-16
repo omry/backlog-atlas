@@ -3,26 +3,37 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from ..errors import UserError
 from . import artifacts, github, local, repo, sources
 from .constants import BACKLOG_BRANCH
 
 
 def run_install(args: argparse.Namespace) -> int:
-    install_source = sources.resolve_install_source(args.install_from)
-    if args.repo and not args.target_root:
+    if args.repo and args.target_root:
+        raise UserError(
+            "--repo and --target-root are mutually exclusive for install; "
+            "use --repo for remote install or --target-root for local checkout install"
+        )
+
+    install_source = sources.resolve_install_source(
+        args.install_from, dry_run=args.dry_run
+    )
+    if args.repo:
         repo_name = repo.resolve_repo(args.repo)
         return github.run_remote_install(
-            repo_name, install_source, args.delivery or "pr"
+            repo_name, install_source, args.delivery or "pr", dry_run=args.dry_run
         )
 
     if args.delivery:
-        raise RuntimeError("--delivery only applies to remote installs with --repo")
+        raise UserError("--delivery only applies to remote installs with --repo")
 
     target_root = (
         Path(args.target_root) if args.target_root else repo.detect_target_root()
     )
-    repo_name = repo.resolve_repo(args.repo, target_root)
-    return local.run_local_install(repo_name, target_root, install_source)
+    repo_name = repo.resolve_repo(None, target_root)
+    return local.run_local_install(
+        repo_name, target_root, install_source, dry_run=args.dry_run
+    )
 
 
 def run_uninstall(args: argparse.Namespace) -> int:
@@ -79,24 +90,27 @@ def add_install_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--repo",
         help=(
-            "GitHub repo owner/name or URL. With --target-root, overrides local "
-            "repo detection; without --target-root, installs remotely."
+            "Repository URL. GitHub URLs are supported today; owner/name is "
+            "accepted as GitHub shorthand. Installs remotely and cannot be "
+            "combined with --target-root."
         ),
     )
     parser.add_argument(
         "--target-root",
         help=(
-            "Target working tree root for local install (default: detected via "
-            "'sl root' or 'git rev-parse --show-toplevel' from cwd)."
+            "Target working tree root for local install. Cannot be combined "
+            "with --repo. Defaults to detection via 'sl root' or "
+            "'git rev-parse --show-toplevel' from cwd."
         ),
     )
     parser.add_argument(
         "--install-from",
         help=(
             "Where the generated GitHub Actions workflow installs Backlog Atlas "
-            "from. Defaults to the current pinned PyPI package version. Use a "
-            "pinned backlog-atlas==X.Y.Z spec or a local checkout path for "
-            "bundled-wheel development installs."
+            "from. Defaults to the source of the current CLI: pinned PyPI "
+            "version for PyPI installs, or bundled wheel for local source "
+            "installs. Use a "
+            "pinned backlog-atlas==X.Y.Z spec or a local checkout path."
         ),
     )
     parser.add_argument(
@@ -104,11 +118,20 @@ def add_install_args(parser: argparse.ArgumentParser) -> None:
         choices=["pr", "push"],
         help="For remote installs, create an install PR or push to the default branch.",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print what install would do without writing files or calling GitHub.",
+    )
 
 
 def add_uninstall_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
-        "--repo", help="GitHub repo owner/name (auto-detected by default)."
+        "--repo",
+        help=(
+            "Repository URL. GitHub URLs are supported today; owner/name is "
+            "accepted as GitHub shorthand. Auto-detected by default."
+        ),
     )
     parser.add_argument("--target-root", help="Target working tree root.")
     parser.add_argument(

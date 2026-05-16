@@ -7,12 +7,14 @@ This guide is for local development and release prep for Backlog Atlas.
 Backlog Atlas is a small Python package with three main surfaces:
 
 - a CLI that fetches GitHub issue and pull request state, derives backlog
-  records, and writes Markdown/JSON artifacts
+  records, and writes JSON/web artifacts
 - bundled templates and static web assets used by installed target repos
 - tests and release automation for validating and publishing the package
 
 Generated backlog output is intended to live on a target repository's
 `backlog-atlas` branch, not on `main`.
+
+For end-user installation and operation, see [`USER-GUIDE.md`](./USER-GUIDE.md).
 
 ## Local Environment
 
@@ -82,7 +84,7 @@ To preview the web UI with real or generated data:
 
 ```sh
 backlog-atlas dump-web --output /tmp/backlog-atlas-preview/
-backlog-atlas update --repo owner/name --data-json-path /tmp/backlog-atlas-preview/backlog.json
+backlog-atlas update --repo https://github.com/owner/name --data-json-path /tmp/backlog-atlas-preview/backlog.json
 cd /tmp/backlog-atlas-preview && python3 -m http.server 8000
 ```
 
@@ -111,7 +113,7 @@ To generate a fresh `backlog.json` from GitHub:
 ```sh
 gh auth status
 backlog-atlas update \
-  --repo owner/name \
+  --repo https://github.com/owner/name \
   --data-json-path /tmp/backlog-atlas-preview/backlog.json \
   --snapshot-path /tmp/backlog-atlas-preview/last_snapshot.json \
   --updates-jsonl-path /tmp/backlog-atlas-preview/updates.jsonl
@@ -148,42 +150,21 @@ The build should include:
 - `backlog_atlas/templates/*.yml`
 - `backlog_atlas/web/index.html`
 
-## Installation Workflow
+## Installation Workflow Development
 
-The generated installation workflow is `backlog_atlas/templates/workflow.yml`.
-In a local checkout, `install` writes this workflow plus
-`.github/backlog-atlas.json` install metadata into the target working tree,
-adds/stages them, and prints commit/push commands; the workflow creates and
-updates artifacts on the `backlog-atlas` branch when it runs in GitHub Actions.
+The generated installation workflow is `backlog_atlas/templates/workflow.yml`;
+the uninstall workflow is `backlog_atlas/templates/uninstall_workflow.yml`.
+The user-facing install and uninstall flows are documented in
+[`USER-GUIDE.md`](./USER-GUIDE.md).
 
-Local install pattern for a target repo:
-
-```sh
-cd /path/to/repo
-backlog-atlas install
-```
-
-The local command requires a clean Sapling or Git working tree before writing
-and adding/staging the workflow and metadata. For normal PyPI installs, it does
-not need `gh`, and it does not create remote branches from the local machine.
-
-Remote install pattern for a repo URL:
-
-```sh
-backlog-atlas install --repo https://github.com/owner/name --delivery pr
-```
-
-Remote installs use `gh` and require write access. `--delivery pr` creates an
-install branch and pull request; `--delivery push` commits directly to the
-default branch.
-
-By default, the generated workflow installs the current Backlog Atlas package
-version from PyPI, pinned as `backlog-atlas==X.Y.Z`. Explicit PyPI installs must
-also use an exact `backlog-atlas==X.Y.Z` pin. For pre-publish testing, point
-`--install-from` at a local Backlog Atlas checkout:
+For pre-publish testing, point `--install-from` at a local Backlog Atlas
+checkout. If the CLI was installed from a local checkout, including editable
+installs with `pip install -e .`, the installer uses that checkout
+automatically when `--install-from` is omitted.
 
 ```sh
 backlog-atlas install \
+  --target-root /path/to/target-repo \
   --install-from /path/to/backlog-atlas
 ```
 
@@ -192,31 +173,9 @@ tree, uploads the wheel to `.backlog-atlas/packages/` on the target repo's
 `backlog-atlas` branch, and makes the generated workflow install that bundled
 wheel. This development install path requires `gh` and write access to the
 target repo, even when the workflow and metadata are written into a local target
-checkout. `.github/backlog-atlas.json` records the package version and bundled
+checkout. The target checkout must have a GitHub remote that Backlog Atlas can
+detect. `.github/backlog-atlas.json` records the package version and bundled
 wheel path.
-
-## Uninstall Workflow
-
-The local `uninstall` command is also local-only. It replaces the installed
-workflow with a one-shot uninstall workflow. After that workflow is committed
-and pushed, GitHub Actions logs that the hook was uninstalled, then removes the
-workflow file and install metadata from `main`.
-
-By default, uninstall keeps the `backlog-atlas` branch so generated backlog
-history remains available for a future reinstall:
-
-```sh
-backlog-atlas uninstall --repo owner/name --target-root /path/to/repo
-```
-
-To also delete the generated branch, encode that in the one-shot workflow:
-
-```sh
-backlog-atlas uninstall \
-  --repo owner/name \
-  --target-root /path/to/repo \
-  --delete-branch
-```
 
 ## Publishing
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from . import artifacts, github, repo
@@ -11,7 +12,7 @@ from .constants import (
 from .models import InstallSource
 
 
-def ensure_worktree_clean(target_root: Path, vcs: str) -> None:
+def ensure_worktree_clean(target_root: Path, vcs: str) -> bool:
     if vcs == "sl":
         output = run_command(["sl", "status"], cwd=target_root)
     elif vcs == "git":
@@ -20,9 +21,13 @@ def ensure_worktree_clean(target_root: Path, vcs: str) -> None:
         raise RuntimeError(f"unsupported VCS: {vcs}")
 
     if output.strip():
-        raise RuntimeError(
-            f"{target_root} has uncommitted changes; commit or stash them before installing"
+        print(
+            f"error: {target_root} has uncommitted changes; "
+            "commit or stash them before installing",
+            file=sys.stderr,
         )
+        return False
+    return True
 
 
 def add_local_install_files(
@@ -71,11 +76,45 @@ def print_local_install_next_steps(repo_name: str, target_root: Path, vcs: str) 
     )
 
 
+def print_local_install_plan(
+    repo_name: str,
+    target_root: Path,
+    install_source: InstallSource,
+    vcs: str,
+) -> None:
+    print("Dry run: would install Backlog Atlas locally")
+    print("No files would be written and no GitHub calls would be made.")
+    print(f"Target repo: {repo_name}")
+    print(f"Target working tree: {target_root}")
+    print(f"Workflow would install Backlog Atlas from: {install_source.pip_spec}")
+    print("Would require a clean working tree.")
+    if install_source.bundled_wheel_path:
+        action = (
+            "Would build and upload bundled wheel"
+            if install_source.bundled_wheel_content is None
+            else "Would upload bundled wheel"
+        )
+        print(f"{action} to {BACKLOG_BRANCH}: " f"{install_source.bundled_wheel_path}")
+    print("Would write or update:")
+    print(f"  - {artifacts.find_workflow_target(target_root)}")
+    print(f"  - {artifacts.find_install_metadata_target(target_root)}")
+    print(f"Would add install artifact(s) with {vcs}.")
+    print("Would print commit, push, workflow trigger, and Pages setup next steps.")
+
+
 def run_local_install(
-    repo_name: str, target_root: Path, install_source: InstallSource
+    repo_name: str,
+    target_root: Path,
+    install_source: InstallSource,
+    dry_run: bool = False,
 ) -> int:
     vcs = repo.detect_local_vcs(target_root)
-    ensure_worktree_clean(target_root, vcs)
+    if dry_run:
+        print_local_install_plan(repo_name, target_root, install_source, vcs)
+        return 0
+
+    if ensure_worktree_clean(target_root, vcs) is False:
+        return 1
     github.ensure_backlog_branch_with_bundle(repo_name, install_source)
 
     print(f"Target repo: {repo_name}")
