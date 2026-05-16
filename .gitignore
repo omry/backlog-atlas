@@ -1,0 +1,8 @@
+backlog_atlas/web/backlog.json
+.backlog-atlas/
+__pycache__/
+*.pyc
+.benchmarks/
+*.egg-info/
+build/
+dist/
