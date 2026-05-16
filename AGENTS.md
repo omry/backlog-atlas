@@ -83,7 +83,7 @@ tests and package tooling.
 - Standalone publication checklist: [`STANDALONE-TODO.md`](./STANDALONE-TODO.md)
 - CLI and core logic: [`backlog_atlas/__init__.py`](./backlog_atlas/__init__.py)
 - Default configuration: [`backlog_atlas/config.yaml`](./backlog_atlas/config.yaml)
-- Workflow template: [`backlog_atlas/templates/workflow.yml.tmpl`](./backlog_atlas/templates/workflow.yml.tmpl)
+- Workflow template: [`backlog_atlas/templates/workflow.yml`](./backlog_atlas/templates/workflow.yml)
 - Static web UI: [`backlog_atlas/web/index.html`](./backlog_atlas/web/index.html)
 - Tests: [`tests/test_update_backlog.py`](./tests/test_update_backlog.py)
 

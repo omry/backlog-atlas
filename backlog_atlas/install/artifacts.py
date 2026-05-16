@@ -1,23 +1,27 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 
 from .commands import read_text
 from .constants import (
     BACKLOG_BRANCH,
-    BEGIN_GENERATED,
-    BEGIN_MANUAL,
-    END_GENERATED,
-    END_MANUAL,
     INSTALL_METADATA_RELATIVE_PATH,
     INSTALL_METADATA_SCHEMA_VERSION,
-    MANUAL_FENCE,
     UNINSTALL_WORKFLOW_TEMPLATE_PATH,
     WORKFLOW_RELATIVE_PATH,
     WORKFLOW_TEMPLATE_PATH,
 )
 from .models import InstallSource
+
+
+@dataclass
+class InstallArtifactResult:
+    workflow_path: Path
+    metadata_path: Path
+    changed_paths: list[Path]
+    workflow_matches: bool
 
 
 def load_workflow_template(install_from: str) -> str:
@@ -76,7 +80,7 @@ def is_managed_workflow(content: str) -> bool:
 
 def write_install_artifacts(
     target_root: Path, install_source: InstallSource
-) -> tuple[Path, Path, list[Path], bool]:
+) -> InstallArtifactResult:
     wf_path = find_workflow_target(target_root)
     metadata_path = find_install_metadata_target(target_root)
     changed_paths = []
@@ -98,12 +102,9 @@ def write_install_artifacts(
         metadata_path, build_install_metadata(install_source)
     ):
         changed_paths.append(metadata_path)
-    return wf_path, metadata_path, changed_paths, workflow_matches
-
-
-def seed_backlog_content(repo: str) -> str:
-    return (
-        f"# Detailed Open Issues: {repo}\n\n"
-        f"{BEGIN_GENERATED}\n*Generated on: -*\n{END_GENERATED}\n\n"
-        f"## Manual comments\n{BEGIN_MANUAL}\n{MANUAL_FENCE}\n{END_MANUAL}\n"
+    return InstallArtifactResult(
+        workflow_path=wf_path,
+        metadata_path=metadata_path,
+        changed_paths=changed_paths,
+        workflow_matches=workflow_matches,
     )

@@ -3,9 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
-import subprocess
 import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -15,36 +13,18 @@ from typing import Any
 
 from omegaconf import DictConfig, OmegaConf
 
-from .install import (
-    InstallSource,
+from .install.cli import (
     add_install_args,
-    add_local_install_files,
     add_uninstall_args,
-    build_install_metadata,
-    detect_default_branch,
-    detect_local_vcs,
-    detect_target_root,
-    find_install_metadata_target,
-    find_workflow_target,
-    install_remote_workflow,
-    is_on_default_branch,
-    load_uninstall_workflow_template,
-    load_workflow_template,
-    resolve_install_source,
     run_install,
     run_uninstall,
 )
+from .install.commands import read_text, run_gh
+from .install.repo import detect_target_root, resolve_repo
 
 PROJECT_DIR = Path(__file__).resolve().parent
-TEMPLATE_PATH = PROJECT_DIR / "templates" / "backlog.md.tmpl"
 WEB_DIR = PROJECT_DIR / "web"
 CONFIG_PATH = PROJECT_DIR / "config.yaml"
-
-BEGIN_GENERATED = "<!-- BEGIN GENERATED BACKLOG -->"
-END_GENERATED = "<!-- END GENERATED BACKLOG -->"
-BEGIN_MANUAL = "<!-- BEGIN MANUAL COMMENTS -->"
-END_MANUAL = "<!-- END MANUAL COMMENTS -->"
-MANUAL_FENCE = '```json\n{\n  "issues": {},\n  "general": []\n}\n```'
 
 STATUS_ORDER = ["in progress", "community PR", "blocked", "not started", "done"]
 
@@ -59,12 +39,9 @@ class CategoryConfig:
 @dataclass
 class BacklogConfig:
     done_expire_days: int | None = 14
-    backlog_filename: str = "BACKLOG.md"
-    updates_filename: str = "BACKLOG-UPDATES.md"
     updates_jsonl_filename: str = "updates.jsonl"
     data_json_filename: str = "backlog.json"
     data_updates_limit: int = 200
-    title_max_length: int = 58
     blocked_labels: list[str] = field(default_factory=lambda: ["awaiting response"])
     repo: str | None = None
     issue_url_template: str = "https://github.com/${repo}/issues/{number}"
@@ -185,111 +162,6 @@ _DEFAULT_CATEGORIES: dict[str, CategoryConfig] = {
 }
 
 
-def strip_ansi(text: str) -> str:
-    return re.sub(r"\x1B\[[0-?]*[ -/]*[@-~]", "", text)
-
-
-def try_command(args: list[str], cwd: Path | None = None) -> str | None:
-    try:
-        completed = subprocess.run(
-            args,
-            check=False,
-            capture_output=True,
-            text=True,
-            env={**os.environ, "NO_COLOR": "1", "CLICOLOR": "0"},
-            cwd=cwd,
-        )
-    except FileNotFoundError:
-        return None
-    if completed.returncode != 0:
-        return None
-    return strip_ansi(completed.stdout)
-
-
-def run_command(args: list[str], cwd: Path | None = None) -> str:
-    try:
-        completed = subprocess.run(
-            args,
-            check=False,
-            capture_output=True,
-            text=True,
-            env={**os.environ, "NO_COLOR": "1", "CLICOLOR": "0"},
-            cwd=cwd,
-        )
-    except FileNotFoundError as e:
-        raise RuntimeError(f"{args[0]} is required but was not found") from e
-    if completed.returncode != 0:
-        stderr = strip_ansi(completed.stderr).strip()
-        stdout = strip_ansi(completed.stdout).strip()
-        details = stderr or stdout or "unknown command failure"
-        raise RuntimeError(f"{' '.join(args)} failed: {details}")
-    return strip_ansi(completed.stdout)
-
-
-def parse_github_repo(url: str) -> str | None:
-    text = (url or "").strip()
-    patterns = [
-        r"^(?:ssh://)?git@github\.com[:/](?P<repo>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?/?$",
-        r"^https://github\.com/(?P<repo>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?/?$",
-        r"^git://github\.com/(?P<repo>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?/?$",
-    ]
-    for pattern in patterns:
-        match = re.match(pattern, text)
-        if match:
-            return match.group("repo")
-    return None
-
-
-def normalize_github_repo(repo_or_url: str) -> str | None:
-    text = (repo_or_url or "").strip()
-    if re.match(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", text):
-        return text
-    return parse_github_repo(text)
-
-
-def detect_repo_from_sl(cwd: Path | None = None) -> str | None:
-    output = try_command(["sl", "paths"], cwd=cwd)
-    if not output:
-        return None
-    for line in output.splitlines():
-        if "=" not in line:
-            continue
-        name, value = line.split("=", 1)
-        if name.strip() not in {"default", "default-push"}:
-            continue
-        repo = parse_github_repo(value)
-        if repo:
-            return repo
-    return None
-
-
-def detect_repo_from_git(cwd: Path | None = None) -> str | None:
-    for args in (
-        ["git", "remote", "get-url", "origin"],
-        ["git", "remote", "get-url", "upstream"],
-    ):
-        output = try_command(args, cwd=cwd)
-        if not output:
-            continue
-        repo = parse_github_repo(output.strip())
-        if repo:
-            return repo
-    return None
-
-
-def resolve_repo(explicit_repo: str | None, cwd: Path | None = None) -> str:
-    if explicit_repo:
-        repo = normalize_github_repo(explicit_repo) or ""
-    else:
-        repo = detect_repo_from_sl(cwd) or detect_repo_from_git(cwd) or ""
-    if normalize_github_repo(repo):
-        return repo
-    raise RuntimeError(
-        "could not determine GitHub repo; pass --repo owner/name or a GitHub URL, "
-        "or ensure Sapling/Git remotes point at GitHub"
-    )
-
-
 def split_repo(repo: str) -> tuple[str, str]:
     owner, name = repo.split("/", 1)
     return owner, name
@@ -301,41 +173,6 @@ def issue_url(cfg: DictConfig, number: str | int) -> str:
 
 def pr_url(cfg: DictConfig, number: str | int) -> str:
     return str(cfg.pr_url_template).format(number=number)
-
-
-def run_gh(args: list[str]) -> str:
-    try:
-        completed = subprocess.run(
-            ["gh", *args],
-            check=False,
-            capture_output=True,
-            text=True,
-            env={**os.environ, "NO_COLOR": "1", "CLICOLOR": "0"},
-        )
-    except FileNotFoundError as e:
-        raise RuntimeError(
-            "GitHub CLI 'gh' is required for GitHub operations; install it "
-            "and run 'gh auth login' or set GH_TOKEN"
-        ) from e
-    if completed.returncode != 0:
-        stderr = strip_ansi(completed.stderr).strip()
-        stdout = strip_ansi(completed.stdout).strip()
-        details = stderr or stdout or "unknown gh failure"
-        raise RuntimeError(f"gh {' '.join(args)} failed: {details}")
-    return strip_ansi(completed.stdout)
-
-
-def read_text(path: Path) -> str:
-    return path.read_text(encoding="utf-8")
-
-
-def write_text_if_changed(path: Path, content: str) -> bool:
-    if path.exists():
-        current = read_text(path)
-        if current == content:
-            return False
-    path.write_text(content, encoding="utf-8")
-    return True
 
 
 def write_text(path: Path, content: str) -> None:
@@ -373,29 +210,6 @@ def iso_now() -> str:
 
 def today() -> str:
     return datetime.now(timezone.utc).date().isoformat()
-
-
-def normalize_whitespace(text: str) -> str:
-    return re.sub(r"\s+", " ", text or "").strip()
-
-
-def truncate_title(title: str, limit: int = 58) -> str:
-    title = normalize_whitespace(title)
-    if len(title) <= limit:
-        return title
-    return title[: limit - 3].rstrip() + "..."
-
-
-def escape_table_cell(text: str) -> str:
-    return (text or "").replace("|", r"\|").replace("\r", " ").replace("\n", " ")
-
-
-def issue_link(cfg: DictConfig, number: str | int) -> str:
-    return f"[#{number}]({issue_url(cfg, number)})"
-
-
-def pr_link(cfg: DictConfig, number: str | int) -> str:
-    return f"[#{number}]({pr_url(cfg, number)})"
 
 
 def parse_labels(issue: dict[str, Any]) -> list[str]:
@@ -450,115 +264,6 @@ def extract_issue_numbers(text: str, repo: str | None = None) -> list[str]:
             add(match.group(1))
 
     return numbers
-
-
-def parse_issue_table_rows(text: str) -> list[dict[str, Any]]:
-    lines = text.splitlines()
-    rows: list[dict[str, Any]] = []
-    header_index = None
-    for index, line in enumerate(lines):
-        if (
-            line.strip()
-            == "| Issue | Title | Category | Status | PR | Created | Updated | Labels |"
-        ):
-            header_index = index
-            break
-    if header_index is None:
-        return rows
-
-    for line in lines[header_index + 2 :]:
-        if not line.startswith("|"):
-            break
-        parts = re.split(r"(?<!\\)\|", line.strip())
-        cells = [part.strip() for part in parts[1:-1]]
-        if len(cells) != 8:
-            continue
-        issue_match = re.search(r"#(\d+)", cells[0])
-        if not issue_match:
-            continue
-        issue_number = issue_match.group(1)
-        pr_numbers = re.findall(r"#(\d+)", cells[4])
-        labels = [label.strip() for label in cells[7].split(",") if label.strip()]
-        status_match = re.match(r'<span\s+title="([^"]*)">', cells[3].strip())
-        status = status_match.group(1) if status_match else cells[3]
-        rows.append(
-            {
-                "number": issue_number,
-                "title": cells[1].replace(r"\|", "|"),
-                "status": status,
-                "pr_numbers": pr_numbers,
-                "created": cells[5],
-                "updated": cells[6],
-                "labels": labels,
-            }
-        )
-    return rows
-
-
-def load_existing_manual_block(text: str) -> str | None:
-    match = re.search(
-        rf"{re.escape(BEGIN_MANUAL)}.*?{re.escape(END_MANUAL)}",
-        text,
-        flags=re.DOTALL,
-    )
-    if not match:
-        return None
-    block = match.group(0)
-    fence_match = re.search(r"```json\n(.*?)\n```", block, flags=re.DOTALL)
-    if not fence_match:
-        raise RuntimeError(
-            "existing manual-comments block is malformed: missing JSON fence"
-        )
-    json.loads(fence_match.group(1))
-    return block
-
-
-def canonical_manual_block() -> str:
-    return "\n".join(
-        [
-            BEGIN_MANUAL,
-            MANUAL_FENCE,
-            END_MANUAL,
-        ]
-    )
-
-
-def render_template(template: str, context: dict[str, Any]) -> str:
-    loop_pattern = re.compile(r"{{#([A-Za-z_][A-Za-z0-9_]*)}}([\s\S]*?){{/\1}}")
-
-    def resolve(name: str, scope: dict[str, Any]) -> str:
-        value = scope.get(name, "")
-        if value is None:
-            return ""
-        return str(value)
-
-    def render_section(section: str, scope: dict[str, Any]) -> str:
-        while True:
-            match = loop_pattern.search(section)
-            if not match:
-                break
-            key = match.group(1)
-            body = match.group(2)
-            items = scope.get(key, []) or []
-            rendered = []
-            for item in items:
-                item_scope = dict(scope)
-                if isinstance(item, dict):
-                    item_scope.update(item)
-                else:
-                    item_scope[key] = item
-                rendered.append(render_section(body, item_scope))
-            section = (
-                section[: match.start()] + "".join(rendered) + section[match.end() :]
-            )
-
-        return re.sub(
-            r"{{\s*([A-Za-z_][A-Za-z0-9_]*)\s*}}",
-            lambda m: resolve(m.group(1), scope),
-            section,
-        )
-
-    return render_section(template, context)
 
 
 def fetch_collaborators(repo: str) -> set[str]:
@@ -708,12 +413,7 @@ def build_pr_lookup(
     return lookup
 
 
-def format_label_string(labels: list[str]) -> str:
-    return ", ".join(escape_table_cell(label) for label in labels)
-
-
 def normalize_previous_row(
-    cfg: DictConfig,
     row: dict[str, Any],
     label_to_category: dict[str, str],
     category_keywords: dict[str, list[str]],
@@ -724,18 +424,81 @@ def normalize_previous_row(
     return {
         **row,
         "title": title,
-        "title_display": escape_table_cell(truncate_title(title, cfg.title_max_length)),
         "category": categorize_issue(
             {"title": title, "labels": [{"name": label} for label in labels]},
             label_to_category,
             category_keywords,
         ),
         "labels": labels,
-        "labels_display": escape_table_cell(format_label_string(labels)),
-        "issue_link": issue_link(cfg, row["number"]),
         "pr_numbers": pr_numbers,
-        "pr_links": ", ".join(pr_link(cfg, pr_number) for pr_number in pr_numbers),
     }
+
+
+def _display_date(value: str | None) -> str:
+    return (value or "")[:10].replace("-", "‑")
+
+
+def _snapshot_issue_to_previous_row(
+    number: str,
+    issue: dict[str, Any],
+    status: str,
+    label_to_category: dict[str, str],
+    category_keywords: dict[str, list[str]],
+) -> dict[str, Any]:
+    labels = list(issue.get("labels", []) or [])
+    return normalize_previous_row(
+        {
+            "number": number,
+            "title": issue.get("title") or "",
+            "status": status,
+            "pr_numbers": [str(value) for value in issue.get("pr_numbers", [])],
+            "created": _display_date(issue.get("created_at")),
+            "updated": _display_date(issue.get("updated_at")),
+            "created_at": issue.get("created_at") or "",
+            "updated_at": issue.get("updated_at") or "",
+            "labels": labels,
+        },
+        label_to_category,
+        category_keywords,
+    )
+
+
+def previous_rows_from_snapshot(
+    snapshot: dict[str, Any] | None,
+    label_to_category: dict[str, str],
+    category_keywords: dict[str, list[str]],
+) -> list[dict[str, Any]]:
+    if not snapshot:
+        return []
+
+    rows: list[dict[str, Any]] = []
+    open_issues = snapshot.get("issues", {}) or {}
+    for number, issue in sorted(open_issues.items(), key=lambda item: int(item[0])):
+        rows.append(
+            _snapshot_issue_to_previous_row(
+                number,
+                issue,
+                issue.get("status") or "not started",
+                label_to_category,
+                category_keywords,
+            )
+        )
+
+    recent_done = snapshot.get("recent_done", {}) or {}
+    for number, issue in sorted(recent_done.items(), key=lambda item: int(item[0])):
+        if number in open_issues:
+            continue
+        rows.append(
+            _snapshot_issue_to_previous_row(
+                number,
+                issue,
+                "done",
+                label_to_category,
+                category_keywords,
+            )
+        )
+
+    return rows
 
 
 def build_current_issue_records(
@@ -767,16 +530,11 @@ def build_current_issue_records(
             status = "not started"
 
         pr_numbers = sorted(pr["number"] for pr in linked_prs)
-        pr_links = ", ".join(pr_link(cfg, pr_number) for pr_number in pr_numbers)
         records.append(
             {
                 "number": number,
                 "title": issue.get("title") or "",
-                "title_display": escape_table_cell(
-                    truncate_title(issue.get("title") or "", cfg.title_max_length)
-                ),
                 "labels": labels,
-                "labels_display": escape_table_cell(format_label_string(labels)),
                 "created_at": issue.get("createdAt") or "",
                 "updated_at": issue.get("updatedAt") or "",
                 "created": (issue.get("createdAt") or "")[:10].replace("-", "‑"),
@@ -786,8 +544,6 @@ def build_current_issue_records(
                 ),
                 "status": status,
                 "pr_numbers": pr_numbers,
-                "issue_link": issue_link(cfg, number),
-                "pr_links": pr_links,
             }
         )
 
@@ -970,46 +726,6 @@ def build_data_json(
     }
 
 
-def render_backlog_file(
-    cfg: DictConfig,
-    rows: list[dict[str, Any]],
-    generated_on: str,
-    manual_block: str,
-) -> str:
-    category_rows, status_rows, open_total = compute_summary_rows(cfg, rows)
-    template = read_text(TEMPLATE_PATH)
-    context = {
-        "generated_on": generated_on,
-        "open_total": str(open_total),
-        "category_rows": [
-            {
-                **r,
-                "category": f"{category_emoji(cfg, r['category'])} {r['category']}",
-            }
-            for r in category_rows
-        ],
-        "status_rows": [
-            {**r, "status": f"{status_emoji(cfg, r['status'])} {r['status']}"}
-            for r in status_rows
-        ],
-        "issue_rows": [
-            {
-                "issue_link": row["issue_link"],
-                "title": row["title_display"],
-                "category": f'<span title="{row["category"]}">{category_emoji(cfg, row["category"]) or row["category"]}</span>',
-                "status": f'<span title="{row["status"]}">{status_emoji(cfg, row["status"]) or row["status"]}</span>',
-                "pr_links": row["pr_links"],
-                "created": row["created"],
-                "updated": row["updated"],
-                "labels": row["labels_display"],
-            }
-            for row in rows
-        ],
-    }
-    generated_block = f"{BEGIN_GENERATED}\n{render_template(template, context).rstrip()}\n{END_GENERATED}"
-    return f"# Detailed Open Issues: {cfg.repo}\n\n{generated_block}\n\n## Manual comments\n{manual_block}\n"
-
-
 def build_run_events(
     cfg: DictConfig,
     generated_at: str,
@@ -1101,61 +817,6 @@ def build_run_events(
     return events
 
 
-_UPDATES_LINE_RE = re.compile(
-    r"^- `(?P<ts>[^`]+)` (?P<kind>new|closed|status|label|pr): "
-    r"\[#(?P<num>\d+)\]\((?P<url>[^)]+)\) "
-    r"(?P<rest>.*)$"
-)
-_STATUS_TAIL_RE = re.compile(
-    r"^(?P<title>.*?): "
-    r"(?P<old>not started|in progress|community PR|blocked|done) → "
-    r"(?P<new>not started|in progress|community PR|blocked|done)"
-    r"(?: \(\[#(?P<pr_num>\d+)\]\((?P<pr_url>[^)]+)\)\))?$"
-)
-_LABEL_TAIL_RE = re.compile(r"^(?P<title>.*?): (?P<detail>(?:added|removed) .*)$")
-
-
-def parse_updates_md(text: str) -> list[dict[str, Any]]:
-    events: list[dict[str, Any]] = []
-    for line in text.splitlines():
-        match = _UPDATES_LINE_RE.match(line)
-        if not match:
-            continue
-        kind = match.group("kind")
-        rest = match.group("rest").strip()
-        evt: dict[str, Any] = {
-            "ts": match.group("ts"),
-            "kind": kind,
-            "issue": int(match.group("num")),
-            "issue_url": match.group("url"),
-        }
-        if kind == "status":
-            tail = _STATUS_TAIL_RE.match(rest)
-            if tail:
-                evt["title"] = tail.group("title")
-                evt["detail"] = f"{tail.group('old')} → {tail.group('new')}"
-                if tail.group("pr_num"):
-                    evt["pr"] = {
-                        "number": int(tail.group("pr_num")),
-                        "url": tail.group("pr_url"),
-                    }
-            else:
-                evt["title"] = rest
-        elif kind == "label":
-            tail = _LABEL_TAIL_RE.match(rest)
-            if tail:
-                evt["title"] = tail.group("title")
-                evt["detail"] = tail.group("detail")
-            else:
-                evt["title"] = rest
-        else:
-            evt["title"] = rest
-        events.append(evt)
-    # File is newest-first; jsonl is oldest-first
-    events.reverse()
-    return events
-
-
 def append_events_jsonl(path: Path, events: list[dict[str, Any]]) -> None:
     if not events:
         return
@@ -1173,41 +834,6 @@ def read_recent_events(path: Path, limit: int) -> list[dict[str, Any]]:
     events = [json.loads(ln) for ln in tail]
     events.reverse()  # newest first for the UI
     return events
-
-
-def render_updates_lines(
-    generated_at: str,
-    new_issues: list[dict[str, Any]],
-    status_changes: list[dict[str, Any]],
-    label_changes: list[dict[str, Any]],
-    closed_issues: list[dict[str, Any]],
-) -> str:
-    ts = f"`{generated_at}`"
-    lines = []
-    for row in new_issues:
-        title = row.get("title_display") or row.get("title") or ""
-        lines.append(f"- {ts} new: {row['issue_link']} {title}")
-    for change in status_changes:
-        pr_suffix = f" ({change['pr_links']})" if change.get("pr_links") else ""
-        title = change.get("title") or ""
-        lines.append(
-            f"- {ts} status: {change['issue_link']} {title}:"
-            f" {change['old_status']} → {change['new_status']}{pr_suffix}"
-        )
-    for change in label_changes:
-        pieces = []
-        if change.get("added"):
-            pieces.append("added " + ", ".join(f'"{lb}"' for lb in change["added"]))
-        if change.get("removed"):
-            pieces.append("removed " + ", ".join(f'"{lb}"' for lb in change["removed"]))
-        title = change.get("title") or ""
-        lines.append(
-            f"- {ts} label: {change['issue_link']} {title}: {'; '.join(pieces)}"
-        )
-    for row in closed_issues:
-        title = row.get("title_display") or row.get("title") or ""
-        lines.append(f"- {ts} closed: {row['issue_link']} {title}")
-    return "\n".join(lines) + "\n" if lines else ""
 
 
 def snapshot_from_open_records(
@@ -1233,6 +859,30 @@ def snapshot_from_open_records(
             if record["status"] != "done"
         },
     }
+
+
+def recent_done_from_render_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    done: dict[str, Any] = {}
+    for row in rows:
+        if row["status"] != "done":
+            continue
+        done[row["number"]] = {
+            "title": row.get("title", ""),
+            "state": "CLOSED",
+            "category": row["category"],
+            "status": "done",
+            "labels": sorted(row.get("labels", [])),
+            "pr_numbers": sorted(
+                row.get("pr_numbers", []), key=lambda value: int(value)
+            ),
+            "created_at": (
+                row.get("created_at") or row.get("created", "").replace("‑", "-")
+            ),
+            "updated_at": (
+                row.get("updated_at") or row.get("updated", "").replace("‑", "-")
+            ),
+        }
+    return done
 
 
 def compare_snapshots(
@@ -1270,10 +920,8 @@ def compare_snapshots(
                 {
                     "number": issue_number,
                     "title": current_rows_by_number[issue_number]["title"],
-                    "issue_link": current_rows_by_number[issue_number]["issue_link"],
                     "old_status": previous.get("status", "not started"),
                     "new_status": current.get("status", "not started"),
-                    "pr_links": current_rows_by_number[issue_number]["pr_links"],
                     "current_pr_numbers": current_rows_by_number[issue_number][
                         "pr_numbers"
                     ],
@@ -1293,7 +941,6 @@ def compare_snapshots(
                 {
                     "number": issue_number,
                     "title": current_rows_by_number[issue_number]["title"],
-                    "issue_link": current_rows_by_number[issue_number]["issue_link"],
                     "added": added_labels,
                     "removed": removed_labels,
                 }
@@ -1308,7 +955,6 @@ def compare_snapshots(
                 {
                     "number": issue_number,
                     "title": current_rows_by_number[issue_number]["title"],
-                    "issue_link": current_rows_by_number[issue_number]["issue_link"],
                     "added_prs": added_prs,
                     "removed_prs": removed_prs,
                 }
@@ -1390,10 +1036,6 @@ def _add_update_args(parser: argparse.ArgumentParser) -> None:
         help="Path to snapshot JSON file. Defaults to the state/ directory next to this script.",
     )
     parser.add_argument(
-        "--event-log-path",
-        help="Path to events.jsonl. Cleared after a successful update.",
-    )
-    parser.add_argument(
         "--commit-msg-path",
         help="Write the descriptive commit message to this file.",
     )
@@ -1421,9 +1063,6 @@ def run_update(args: argparse.Namespace) -> int:
         if args.snapshot_path
         else state_dir / "last_snapshot.json"
     )
-    event_log_path = Path(args.event_log_path) if args.event_log_path else None
-    backlog_path = target_root / cfg.backlog_filename
-    updates_path = target_root / cfg.updates_filename
     data_json_path = (
         Path(args.data_json_path)
         if args.data_json_path
@@ -1442,33 +1081,22 @@ def run_update(args: argparse.Namespace) -> int:
         cat: c.keywords for cat, c in categories.items()
     }
 
-    backlog_text = read_text(backlog_path) if backlog_path.exists() else ""
-    previous_rows = [
-        normalize_previous_row(cfg, row, label_to_category, category_keywords)
-        for row in parse_issue_table_rows(backlog_text)
-    ]
-    previous_rows_by_number = {row["number"]: row for row in previous_rows}
-    manual_block = load_existing_manual_block(backlog_text) or canonical_manual_block()
     previous_snapshot = load_json_file(snapshot_path)
     if previous_snapshot and previous_snapshot.get("repo") not in {None, repo}:
         previous_snapshot = None
+    previous_rows = previous_rows_from_snapshot(
+        previous_snapshot, label_to_category, category_keywords
+    )
+    previous_rows_by_number = {row["number"]: row for row in previous_rows}
 
     collaborators = fetch_collaborators(repo)
     open_issues = fetch_open_issues(repo)
-    preserved_done_numbers = {
-        row["number"] for row in previous_rows if row["status"] == "done"
-    }
-    active_open_issues = [
-        issue
-        for issue in open_issues
-        if str(issue["number"]) not in preserved_done_numbers
-    ]
-    open_issue_numbers = {str(issue["number"]) for issue in active_open_issues}
+    open_issue_numbers = {str(issue["number"]) for issue in open_issues}
     open_prs = fetch_open_prs(repo)
     pr_lookup = build_pr_lookup(open_prs, open_issue_numbers)
     current_records = build_current_issue_records(
         cfg,
-        active_open_issues,
+        open_issues,
         collaborators,
         pr_lookup,
         label_to_category,
@@ -1486,10 +1114,13 @@ def run_update(args: argparse.Namespace) -> int:
     render_rows = merge_rows_for_render(
         current_records, previous_rows, closed_at, expire_days=cfg.done_expire_days
     )
-    rendered_numbers = {row["number"] for row in render_rows}
-    current_snapshot["closed_at"] = {
-        num: dt for num, dt in closed_at.items() if num in rendered_numbers
+    rendered_done_numbers = {
+        row["number"] for row in render_rows if row["status"] == "done"
     }
+    current_snapshot["closed_at"] = {
+        num: dt for num, dt in closed_at.items() if num in rendered_done_numbers
+    }
+    current_snapshot["recent_done"] = recent_done_from_render_rows(render_rows)
     new_issues, status_changes, label_changes, closed_issues, pr_changes = (
         compare_snapshots(
             previous_snapshot,
@@ -1498,15 +1129,6 @@ def run_update(args: argparse.Namespace) -> int:
             previous_rows_by_number,
         )
     )
-    updates_lines = render_updates_lines(
-        generated_at, new_issues, status_changes, label_changes, closed_issues
-    )
-
-    backlog_content = render_backlog_file(cfg, render_rows, generated_on, manual_block)
-    backlog_changed = (
-        not backlog_path.exists() or read_text(backlog_path) != backlog_content
-    )
-    updates_changed = bool(updates_lines)
 
     run_events = build_run_events(
         cfg,
@@ -1518,21 +1140,10 @@ def run_update(args: argparse.Namespace) -> int:
         pr_changes,
     )
 
-    seed_events: list[dict[str, Any]] = []
-    bootstrapped = False
-    if not updates_jsonl_path.exists() and updates_path.exists():
-        seed_events = parse_updates_md(read_text(updates_path))
-        if seed_events:
-            bootstrapped = True
-            if not args.dry_run:
-                append_events_jsonl(updates_jsonl_path, seed_events)
-
     if not args.dry_run and run_events:
         append_events_jsonl(updates_jsonl_path, run_events)
 
     recent_events = read_recent_events(updates_jsonl_path, cfg.data_updates_limit)
-    if args.dry_run and seed_events:
-        recent_events = list(reversed(seed_events)) + recent_events
     if args.dry_run and run_events:
         # Dry-run still wants to preview the updates that would be embedded.
         recent_events = list(reversed(run_events)) + recent_events
@@ -1548,17 +1159,9 @@ def run_update(args: argparse.Namespace) -> int:
 
     if args.dry_run:
         print(f"Resolved GitHub repo: {repo}")
-        print(f"BACKLOG.md would {'change' if backlog_changed else 'remain unchanged'}")
-        print(
-            f"BACKLOG-UPDATES.md would {'prepend lines' if updates_changed else 'remain unchanged'}"
-        )
         print(
             f"{cfg.data_json_filename} would {'change' if data_json_changed else 'remain unchanged'}"
         )
-        if bootstrapped:
-            print(
-                f"{cfg.updates_jsonl_filename} would be bootstrapped from {cfg.updates_filename}"
-            )
         print(
             f"{cfg.updates_jsonl_filename} would append {len(run_events)} event(s)"
             if run_events
@@ -1567,30 +1170,12 @@ def run_update(args: argparse.Namespace) -> int:
         print(f"Snapshot would contain {len(current_snapshot['issues'])} open issues")
         return 0
 
-    if backlog_changed:
-        write_text(backlog_path, backlog_content)
     if data_json_changed:
         write_text(data_json_path, data_json_content)
-
-    if updates_changed:
-        existing_updates = read_text(updates_path) if updates_path.exists() else ""
-        separator = (
-            "\n" if existing_updates and not existing_updates.startswith("\n") else ""
-        )
-        write_text(updates_path, updates_lines + separator + existing_updates)
-    else:
-        ensure_text_file(updates_path)
 
     ensure_text_file(updates_jsonl_path)
 
     save_snapshot(current_snapshot, snapshot_path)
-    if event_log_path:
-        event_log_path.parent.mkdir(parents=True, exist_ok=True)
-        event_log_path.write_text("", encoding="utf-8")
-    print(
-        "Updated BACKLOG.md" if backlog_changed else "BACKLOG.md already up to date",
-        file=sys.stdout,
-    )
     print(
         (
             f"Updated {cfg.data_json_filename}"
@@ -1599,18 +1184,11 @@ def run_update(args: argparse.Namespace) -> int:
         ),
         file=sys.stdout,
     )
-    if bootstrapped:
-        print(
-            f"Bootstrapped {cfg.updates_jsonl_filename} from {cfg.updates_filename}",
-            file=sys.stdout,
-        )
     if run_events:
         print(
             f"Appended {len(run_events)} event(s) to {cfg.updates_jsonl_filename}",
             file=sys.stdout,
         )
-    if updates_changed:
-        print("Prepended lines to BACKLOG-UPDATES.md", file=sys.stdout)
     else:
         print("No backlog updates needed", file=sys.stdout)
     print(
@@ -1637,7 +1215,7 @@ def main() -> int:
 
     p_update = sub.add_parser(
         "update",
-        help="Regenerate BACKLOG.md, backlog.json, and updates.jsonl from GitHub state.",
+        help="Regenerate backlog.json and updates.jsonl from GitHub state.",
     )
     _add_update_args(p_update)
 

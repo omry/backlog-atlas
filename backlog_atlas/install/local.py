@@ -82,23 +82,21 @@ def run_local_install(
     print(f"Target working tree: {target_root}")
     print(f"Workflow will install Backlog Atlas from: {install_source.pip_spec}")
 
-    wf_path, metadata_path, changed_paths, workflow_matches = (
-        artifacts.write_install_artifacts(target_root, install_source)
-    )
-    if changed_paths:
-        if wf_path in changed_paths:
-            print(f"wrote workflow to {wf_path}")
+    result = artifacts.write_install_artifacts(target_root, install_source)
+    if result.changed_paths:
+        if result.workflow_path in result.changed_paths:
+            print(f"wrote workflow to {result.workflow_path}")
         else:
-            print(f"workflow already exists at {wf_path}")
-        if metadata_path in changed_paths:
-            print(f"wrote install metadata to {metadata_path}")
-        add_local_install_files(target_root, changed_paths, vcs)
+            print(f"workflow already exists at {result.workflow_path}")
+        if result.metadata_path in result.changed_paths:
+            print(f"wrote install metadata to {result.metadata_path}")
+        add_local_install_files(target_root, result.changed_paths, vcs)
         print(f"added install artifact(s) with {vcs}")
         print_local_install_next_steps(repo_name, target_root, vcs)
     else:
-        print(f"workflow already exists at {wf_path}")
-        if workflow_matches:
-            print(f"install metadata already exists at {metadata_path}")
+        print(f"workflow already exists at {result.workflow_path}")
+        if result.workflow_matches:
+            print(f"install metadata already exists at {result.metadata_path}")
             print("\nNothing to do - Backlog Atlas is already installed in this repo.")
         else:
             print(

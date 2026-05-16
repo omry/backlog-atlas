@@ -29,7 +29,7 @@ High-level items to take this subproject to a published standalone project.
 ## Docs
 
 - [ ] Expand README: install from PyPI, quick-start, web UI screenshot, a "what this does to your repo" section for `install` (writes and adds/stages a workflow plus install metadata; the workflow creates the branch).
-- [ ] Optional design note on the snapshot/diff/event-log model so contributors understand the moving parts.
+- [ ] Optional design note on the snapshot/diff/update-log model so contributors understand the moving parts.
 
 ## Dogfooding
 

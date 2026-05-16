@@ -10,12 +10,9 @@ recent backlog activity.
 
 Outputs land on a dedicated `backlog-atlas` branch (kept off `main` so issue churn doesn't pollute the main history):
 
-- `BACKLOG.md` — categorized table of open issues + recently-done.
-- `BACKLOG-UPDATES.md` — append-only human changelog of new/closed/status/label events.
-- `backlog.json` — same data as `BACKLOG.md` but structured, consumed by the web UI.
-- `updates.jsonl` — append-only structured event log (machine-readable changelog). Bootstrapped from `BACKLOG-UPDATES.md` on first run.
+- `backlog.json` — structured backlog snapshot plus a capped recent activity tail, consumed by the web UI.
+- `updates.jsonl` — append-only structured event log (machine-readable changelog).
 - `last_snapshot.json` — internal state used to diff against the next run.
-- `events.jsonl` — log of GitHub issue/PR events queued for the next debounced run.
 - `index.html` — bundled with the package; copied to the `backlog-atlas` branch by the workflow so a static page can be served via GitHub Pages.
 
 ## Install
@@ -49,7 +46,7 @@ Fetches issues/PRs from GitHub via `gh` and rewrites the backlog files. Useful f
 
 - `--repo owner/name` — override repo detection (defaults to `sl`/`git` remote).
 - `--dry-run` — print what would change without writing.
-- `--snapshot-path` / `--event-log-path` / `--commit-msg-path` — workflow-driven I/O paths.
+- `--snapshot-path` / `--commit-msg-path` — workflow-driven I/O paths.
 - `--data-json-path` / `--updates-jsonl-path` — override default output locations.
 
 Defaults write everything under `<target-repo>/.backlog-atlas/` so the file system isn't littered.
@@ -120,13 +117,12 @@ MIT.
 ├── README.md
 ├── MAINTAINERS.md
 ├── backlog_atlas/
-│   ├── __init__.py             # CLI + all logic (single-module package for now)
+│   ├── core.py                 # CLI and backlog generation logic
+│   ├── install/                # install/uninstall workflow helpers
 │   ├── config.yaml             # default category/keyword/emoji config
 │   ├── templates/
-│   │   ├── backlog.md.tmpl
-│   │   ├── backlog_updates_entry.md.tmpl
-│   │   ├── workflow.yml.tmpl   # GitHub Actions workflow template installed by `install`
-│   │   └── uninstall_workflow.yml.tmpl
+│   │   ├── workflow.yml        # GitHub Actions workflow template installed by `install`
+│   │   └── uninstall_workflow.yml
 │   └── web/
 │       └── index.html          # bundled static UI
 └── tests/

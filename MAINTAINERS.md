@@ -145,12 +145,12 @@ The build should include:
 
 - `LICENSE`
 - `backlog_atlas/config.yaml`
-- `backlog_atlas/templates/*.tmpl`
+- `backlog_atlas/templates/*.yml`
 - `backlog_atlas/web/index.html`
 
 ## Installation Workflow
 
-The generated installation workflow is `backlog_atlas/templates/workflow.yml.tmpl`.
+The generated installation workflow is `backlog_atlas/templates/workflow.yml`.
 In a local checkout, `install` writes this workflow plus
 `.github/backlog-atlas.json` install metadata into the target working tree,
 adds/stages them, and prints commit/push commands; the workflow creates and

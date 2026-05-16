@@ -18,11 +18,11 @@ backlog-atlas = "backlog_atlas.core:main"
 
 [tool.setuptools.packages.find]
 include = ["backlog_atlas*"]
-namespaces = false
+namespaces = true
 
 [tool.setuptools.package-data]
 backlog_atlas = [
     "config.yaml",
-    "templates/*.tmpl",
+    "templates/*.yml",
     "web/*",
 ]

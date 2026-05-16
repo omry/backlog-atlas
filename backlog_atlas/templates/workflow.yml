@@ -38,67 +38,14 @@ jobs:
           git checkout --orphan "$BACKLOG_ATLAS_BRANCH"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          cat > BACKLOG.md <<EOF
-          # Detailed Open Issues: $GITHUB_REPOSITORY
-
-          <!-- BEGIN GENERATED BACKLOG -->
-          *Generated on: -*
-          <!-- END GENERATED BACKLOG -->
-
-          ## Manual comments
-          <!-- BEGIN MANUAL COMMENTS -->
-          \`\`\`json
-          {
-            "issues": {},
-            "general": []
-          }
-          \`\`\`
-          <!-- END MANUAL COMMENTS -->
-          EOF
-          git add BACKLOG.md
+          mkdir -p .backlog-atlas
+          : > .backlog-atlas/.keep
+          git add .backlog-atlas/.keep
           git commit -m "backlog: initialize $BACKLOG_ATLAS_BRANCH branch"
           if git push "$remote_url" HEAD:"$BACKLOG_ATLAS_BRANCH"; then
             exit 0
           fi
           git ls-remote --exit-code --heads "$remote_url" "$BACKLOG_ATLAS_BRANCH" >/dev/null
-
-  log-event:
-    if: github.event_name == 'issues' || github.event_name == 'pull_request'
-    needs: ensure-backlog-branch
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.BACKLOG_ATLAS_BRANCH }}
-          path: backlog-atlas-branch
-      - name: Append event to log
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          EVENT_ACTION: ${{ github.event.action }}
-          ISSUE_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
-        run: |
-          jq -n \
-            --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --arg event "$EVENT_NAME" \
-            --arg action "$EVENT_ACTION" \
-            --arg number "$ISSUE_NUMBER" \
-            '{ts: $ts, event: $event, action: $action, number: $number}' \
-            >> backlog-atlas-branch/events.jsonl
-      - name: Push event log
-        run: |
-          cd backlog-atlas-branch
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add events.jsonl
-          git diff --cached --quiet && exit 0
-          git commit -m "event: ${{ github.event_name }}.${{ github.event.action }} #${{ github.event.issue.number || github.event.pull_request.number }} [skip ci]"
-          for i in 1 2 3; do
-            if git pull --rebase origin "$BACKLOG_ATLAS_BRANCH" && git push origin HEAD:"$BACKLOG_ATLAS_BRANCH"; then
-              exit 0
-            fi
-            sleep $((i * 3))
-          done
-          exit 1
 
   process:
     needs: ensure-backlog-branch
@@ -126,17 +73,12 @@ jobs:
         run: |
           cd backlog-atlas-branch
           git pull --rebase origin "$BACKLOG_ATLAS_BRANCH"
-      - name: Seed backlog files for tool
-        run: |
-          cp backlog-atlas-branch/BACKLOG.md BACKLOG.md 2>/dev/null || true
-          cp backlog-atlas-branch/BACKLOG-UPDATES.md BACKLOG-UPDATES.md 2>/dev/null || true
       - name: Update backlog
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           backlog-atlas update \
             --snapshot-path backlog-atlas-branch/last_snapshot.json \
-            --event-log-path backlog-atlas-branch/events.jsonl \
             --data-json-path backlog-atlas-branch/backlog.json \
             --updates-jsonl-path backlog-atlas-branch/updates.jsonl \
             --commit-msg-path /tmp/backlog_commit_msg.txt
@@ -145,13 +87,11 @@ jobs:
           backlog-atlas dump-web --output backlog-atlas-branch/index.html
       - name: Commit to Backlog Atlas branch
         run: |
-          cp BACKLOG.md backlog-atlas-branch/BACKLOG.md
-          [ -f BACKLOG-UPDATES.md ] && cp BACKLOG-UPDATES.md backlog-atlas-branch/BACKLOG-UPDATES.md || true
           cd backlog-atlas-branch
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add BACKLOG.md BACKLOG-UPDATES.md last_snapshot.json events.jsonl \
-                  backlog.json updates.jsonl index.html
+          git rm --ignore-unmatch BACKLOG.md BACKLOG-UPDATES.md
+          git add .backlog-atlas last_snapshot.json backlog.json updates.jsonl index.html
           git diff --cached --quiet && exit 0
           COMMIT_MSG=$(cat /tmp/backlog_commit_msg.txt 2>/dev/null || echo "backlog: sync [skip ci]")
           git commit -m "$COMMIT_MSG"

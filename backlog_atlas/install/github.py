@@ -4,11 +4,7 @@ import base64
 import json
 from typing import Any
 
-from .artifacts import (
-    build_install_metadata,
-    load_workflow_template,
-    seed_backlog_content,
-)
+from .artifacts import build_install_metadata, load_workflow_template
 from .commands import run_gh, try_gh
 from .constants import (
     BACKLOG_BRANCH,
@@ -130,7 +126,6 @@ def ensure_backlog_branch_with_bundle(repo: str, install_source: InstallSource) 
     tree_sha = create_tree(
         repo,
         {
-            "BACKLOG.md": seed_backlog_content(repo).encode(),
             install_source.bundled_wheel_path: install_source.bundled_wheel_content,
         },
     )

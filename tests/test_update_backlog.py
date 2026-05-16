@@ -12,11 +12,13 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import backlog_atlas.core as ub  # noqa: E402
-import backlog_atlas.install as inst  # noqa: E402
-from backlog_atlas.install import github as install_github  # noqa: E402
-from backlog_atlas.install import local as install_local  # noqa: E402
-from backlog_atlas.install import repo as install_repo  # noqa: E402
-from backlog_atlas.install import sources as install_sources  # noqa: E402
+import backlog_atlas.install.artifacts as install_artifacts  # noqa: E402
+import backlog_atlas.install.commands as install_commands  # noqa: E402
+import backlog_atlas.install.github as install_github  # noqa: E402
+import backlog_atlas.install.local as install_local  # noqa: E402
+import backlog_atlas.install.repo as install_repo  # noqa: E402
+import backlog_atlas.install.sources as install_sources  # noqa: E402
+from backlog_atlas.install.models import InstallSource  # noqa: E402
 
 # Helpers derived from _DEFAULT_CATEGORIES for tests
 _L2C = {label: cat for cat, c in ub._DEFAULT_CATEGORIES.items() for label in c.labels}
@@ -35,44 +37,17 @@ def _cfg(repo: str = "o/r") -> Any:
 
 
 def test_try_command_missing_binary():
-    assert ub.try_command(["nonexistent_binary_xyz"]) is None
+    assert install_commands.try_command(["nonexistent_binary_xyz"]) is None
 
 
 def test_try_command_nonzero_exit():
-    assert ub.try_command(["false"]) is None
+    assert install_commands.try_command(["false"]) is None
 
 
 def test_try_command_success():
-    result = ub.try_command(["echo", "hello"])
+    result = install_commands.try_command(["echo", "hello"])
     assert result is not None
     assert "hello" in result
-
-
-# ---------------------------------------------------------------------------
-# render_template
-# ---------------------------------------------------------------------------
-
-
-def test_render_template_simple_var():
-    assert ub.render_template("hello {{name}}", {"name": "world"}) == "hello world"
-
-
-def test_render_template_missing_var_is_empty():
-    assert ub.render_template("{{x}}", {}) == ""
-
-
-def test_render_template_section_loop():
-    tmpl = "{{#items}}[{{val}}]{{/items}}"
-    result = ub.render_template(tmpl, {"items": [{"val": "a"}, {"val": "b"}]})
-    assert result == "[a][b]"
-
-
-def test_render_template_empty_section():
-    assert ub.render_template("{{#items}}x{{/items}}", {"items": []}) == ""
-
-
-def test_render_template_none_section():
-    assert ub.render_template("{{#items}}x{{/items}}", {"items": None}) == ""
 
 
 # ---------------------------------------------------------------------------
@@ -209,14 +184,10 @@ def _record(
     return {
         "number": number,
         "title": f"Issue {number}",
-        "title_display": f"Issue {number}",
         "status": status,
         "category": "Enhancement",
         "labels": labels,
-        "labels_display": "",
         "pr_numbers": [],
-        "pr_links": "",
-        "issue_link": f"[#{number}](url)",
         "created": "2024-01-01",
         "updated": "2024-01-01",
         "created_at": "2024-01-01T00:00:00Z",
@@ -341,14 +312,14 @@ def _prev_row(
 
 def test_normalize_previous_row_derives_category_from_title():
     row = ub.normalize_previous_row(
-        _cfg(), _prev_row("803", "[Question] Why hide this?"), _L2C, _KW
+        _prev_row("803", "[Question] Why hide this?"), _L2C, _KW
     )
     assert row["category"] == "Question"
 
 
 def test_normalize_previous_row_derives_category_from_label():
     row = ub.normalize_previous_row(
-        _cfg(), _prev_row("1", "Something", labels=["bug"]), _L2C, _KW
+        _prev_row("1", "Something", labels=["bug"]), _L2C, _KW
     )
     assert row["category"] == "Bug"
 
@@ -358,8 +329,40 @@ def test_normalize_previous_row_ignores_stale_category_field():
         **_prev_row("1", "Add a feature"),
         "category": '<span title="<span>garbage</span>">✨</span>',
     }
-    row = ub.normalize_previous_row(_cfg(), raw, _L2C, _KW)
+    row = ub.normalize_previous_row(raw, _L2C, _KW)
     assert row["category"] == "Enhancement"
+
+
+def test_previous_rows_from_snapshot_includes_recent_done():
+    snapshot = {
+        "repo": "o/r",
+        "issues": {
+            "1": {
+                "title": "Open bug",
+                "status": "blocked",
+                "labels": ["bug"],
+                "pr_numbers": ["10"],
+                "created_at": "2024-01-01T00:00:00Z",
+                "updated_at": "2024-01-02T00:00:00Z",
+            }
+        },
+        "recent_done": {
+            "2": {
+                "title": "Closed question",
+                "labels": ["question"],
+                "pr_numbers": [],
+                "created_at": "2024-01-03T00:00:00Z",
+                "updated_at": "2024-01-04T00:00:00Z",
+            }
+        },
+    }
+
+    rows = ub.previous_rows_from_snapshot(snapshot, _L2C, _KW)
+
+    assert [(row["number"], row["status"], row["category"]) for row in rows] == [
+        ("1", "blocked", "Bug"),
+        ("2", "done", "Question"),
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -423,10 +426,6 @@ def _done_prev_row(number: str, days_old: int) -> dict[str, Any]:
     updated = (date.today() - timedelta(days=days_old)).isoformat().replace("-", "‑")
     row = _prev_row(number, f"Issue {number}", status="done")
     row["updated"] = updated
-    row["title_display"] = f"Issue {number}"
-    row["labels_display"] = ""
-    row["issue_link"] = f"[#{number}](url)"
-    row["pr_links"] = ""
     row["category"] = "Enhancement"
     return row
 
@@ -458,45 +457,9 @@ def test_merge_closed_at_overrides_updated_field():
 # ---------------------------------------------------------------------------
 
 
-def test_event_log_cleared_after_update(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    event_log = tmp_path / "events.jsonl"
-    event_log.write_text('{"event": "issues", "action": "opened"}\n', encoding="utf-8")
-    snapshot_path = tmp_path / "snap.json"
-
-    def fake_fetch_collaborators(repo: str) -> set[str]:
-        return set()
-
-    def fake_fetch_open_issues(repo: str) -> list[dict[str, Any]]:
-        return []
-
-    def fake_fetch_open_prs(repo: str) -> list[dict[str, Any]]:
-        return []
-
-    monkeypatch.setattr(ub, "fetch_collaborators", fake_fetch_collaborators)
-    monkeypatch.setattr(ub, "fetch_open_issues", fake_fetch_open_issues)
-    monkeypatch.setattr(ub, "fetch_open_prs", fake_fetch_open_prs)
-    monkeypatch.setattr(ub, "detect_target_root", lambda *a, **kw: tmp_path)
-
-    with patch.object(ub, "resolve_repo", return_value="o/r"):
-        sys.argv = [
-            "backlog-atlas",
-            "update",
-            "--snapshot-path",
-            str(snapshot_path),
-            "--event-log-path",
-            str(event_log),
-        ]
-        ub.main()
-
-    assert event_log.read_text(encoding="utf-8") == ""
-
-
 def test_initial_update_creates_empty_artifacts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    event_log = tmp_path / "events.jsonl"
     snapshot_path = tmp_path / "last_snapshot.json"
 
     monkeypatch.setattr(ub, "fetch_collaborators", lambda repo: set())
@@ -510,25 +473,40 @@ def test_initial_update_creates_empty_artifacts(
             "update",
             "--snapshot-path",
             str(snapshot_path),
-            "--event-log-path",
-            str(event_log),
         ]
         ub.main()
 
-    assert (tmp_path / "BACKLOG-UPDATES.md").read_text(encoding="utf-8") == ""
-    assert event_log.read_text(encoding="utf-8") == ""
+    assert not (tmp_path / "BACKLOG.md").exists()
+    assert not (tmp_path / "BACKLOG-UPDATES.md").exists()
+    assert (tmp_path / ".backlog-atlas" / "backlog.json").exists()
     assert (tmp_path / ".backlog-atlas" / "updates.jsonl").read_text(
         encoding="utf-8"
     ) == ""
 
 
-def test_dry_run_does_not_bootstrap_updates_jsonl(
+def test_dry_run_does_not_write_updates_jsonl(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    updates = tmp_path / "BACKLOG-UPDATES.md"
     updates_jsonl = tmp_path / "updates.jsonl"
-    updates.write_text(
-        "- `2024-01-01T00:00:00Z` new: [#1](https://github.com/o/r/issues/1) Issue 1\n",
+    snapshot_path = tmp_path / "last_snapshot.json"
+    snapshot_path.write_text(
+        json.dumps(
+            {
+                "repo": "o/r",
+                "generated_at": "2024-01-01T00:00:00Z",
+                "issues": {
+                    "1": {
+                        "title": "Issue 1",
+                        "status": "not started",
+                        "labels": [],
+                        "category": "Enhancement",
+                        "pr_numbers": [],
+                        "created_at": "2024-01-01T00:00:00Z",
+                        "updated_at": "2024-01-01T00:00:00Z",
+                    }
+                },
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -542,6 +520,8 @@ def test_dry_run_does_not_bootstrap_updates_jsonl(
             "backlog-atlas",
             "update",
             "--dry-run",
+            "--snapshot-path",
+            str(snapshot_path),
             "--updates-jsonl-path",
             str(updates_jsonl),
         ]
@@ -585,7 +565,7 @@ def _make_backlog_atlas_checkout(tmp_path: Path) -> Path:
 
 
 def test_workflow_template_substitutes_install_source():
-    out = ub.load_workflow_template("git+https://example.com/x.git")
+    out = install_artifacts.load_workflow_template("git+https://example.com/x.git")
     assert "__BACKLOG_ATLAS_PIP__" not in out
     assert "BACKLOG_ATLAS_PIP: git+https://example.com/x.git" in out
     assert "BACKLOG_ATLAS_BRANCH: backlog-atlas" in out
@@ -594,6 +574,14 @@ def test_workflow_template_substitutes_install_source():
     assert "backlog-atlas dump-web" in out
     assert "ensure-backlog-branch:" in out
     assert "needs: ensure-backlog-branch" in out
+    assert ".backlog-atlas/.keep" in out
+    assert "git rm --ignore-unmatch BACKLOG.md BACKLOG-UPDATES.md" in out
+    assert "git add BACKLOG.md" not in out
+    assert "cp BACKLOG.md" not in out
+    assert "Seed backlog files for tool" not in out
+    assert "log-event:" not in out
+    assert "events.jsonl" not in out
+    assert "--event-log-path" not in out
     assert 'git push "$remote_url" HEAD:"$BACKLOG_ATLAS_BRANCH"' in out
     assert "ref: ${{ env.BACKLOG_ATLAS_BRANCH }}" in out
     assert "ref: ${{ github.event.repository.default_branch }}" in out
@@ -699,7 +687,10 @@ def test_install_writes_metadata_when_existing_workflow_matches(
     wf = tmp_path / ".github" / "workflows" / "update-backlog-atlas.yml"
     metadata = tmp_path / ".github" / "backlog-atlas.json"
     wf.parent.mkdir(parents=True)
-    wf.write_text(ub.load_workflow_template("backlog-atlas==1.2.3"), encoding="utf-8")
+    wf.write_text(
+        install_artifacts.load_workflow_template("backlog-atlas==1.2.3"),
+        encoding="utf-8",
+    )
     calls = _stub_local_install(monkeypatch)
     sys.argv = [
         "backlog-atlas",
@@ -721,9 +712,9 @@ def test_install_updates_managed_existing_workflow_and_metadata(
     wf = tmp_path / ".github" / "workflows" / "update-backlog-atlas.yml"
     metadata = tmp_path / ".github" / "backlog-atlas.json"
     wf.parent.mkdir(parents=True)
-    old_workflow = ub.load_workflow_template("backlog-atlas==1.2.3").replace(
-        "ref: ${{ github.event.repository.default_branch }}", "ref: main"
-    )
+    old_workflow = install_artifacts.load_workflow_template(
+        "backlog-atlas==1.2.3"
+    ).replace("ref: ${{ github.event.repository.default_branch }}", "ref: main")
     wf.write_text(old_workflow, encoding="utf-8")
     calls = _stub_local_install(monkeypatch)
     sys.argv = [
@@ -792,9 +783,9 @@ def test_resolve_install_source_from_local_checkout_builds_bundled_wheel(
         lambda path: ("backlog_atlas-2.3.4-py3-none-any.whl", b"wheel bytes"),
     )
 
-    source = inst.resolve_install_source(str(source_root))
+    source = install_sources.resolve_install_source(str(source_root))
 
-    assert source == inst.InstallSource(
+    assert source == InstallSource(
         pip_spec=(
             "backlog-atlas-branch/.backlog-atlas/packages/"
             "backlog_atlas-2.3.4-py3-none-any.whl"
@@ -808,7 +799,7 @@ def test_resolve_install_source_from_local_checkout_builds_bundled_wheel(
 
 def test_install_rejects_floating_install_source():
     with pytest.raises(RuntimeError, match="must be a pinned PyPI spec"):
-        inst.resolve_install_source("git+https://example.com/x.git@main")
+        install_sources.resolve_install_source("git+https://example.com/x.git@main")
 
 
 def test_install_local_target_bundles_local_source(
@@ -817,7 +808,7 @@ def test_install_local_target_bundles_local_source(
     calls = _stub_local_install(monkeypatch)
     source_root = _make_backlog_atlas_checkout(tmp_path)
     target_root = tmp_path / "target"
-    bundle_calls: list[tuple[str, inst.InstallSource]] = []
+    bundle_calls: list[tuple[str, InstallSource]] = []
     monkeypatch.setattr(
         install_sources,
         "build_local_wheel",
@@ -907,7 +898,7 @@ def test_install_remote_defaults_to_pr_delivery_for_github_url(
     captured: dict[str, str] = {}
 
     def fake_remote_install(
-        repo: str, install_source: inst.InstallSource, delivery: str
+        repo: str, install_source: InstallSource, delivery: str
     ) -> None:
         captured.update(
             {
@@ -946,7 +937,7 @@ def test_install_remote_supports_push_delivery_for_ssh_url(
     captured: dict[str, str] = {}
 
     def fake_remote_install(
-        repo: str, install_source: inst.InstallSource, delivery: str
+        repo: str, install_source: InstallSource, delivery: str
     ) -> None:
         captured.update(
             {
@@ -991,7 +982,7 @@ def test_install_remote_bundles_local_source(
     )
 
     def fake_remote_install(
-        repo: str, install_source: inst.InstallSource, delivery: str
+        repo: str, install_source: InstallSource, delivery: str
     ) -> None:
         captured.update(
             {
@@ -1059,7 +1050,7 @@ def test_install_remote_pr_writes_workflow_and_metadata(
 
     install_github.install_remote_workflow(
         "o/r",
-        inst.InstallSource(
+        InstallSource(
             pip_spec="backlog-atlas==1.2.3",
             version="1.2.3",
             source_type="pypi",
@@ -1086,7 +1077,7 @@ def test_bundled_wheel_is_published_to_backlog_branch(
     monkeypatch: pytest.MonkeyPatch,
 ):
     calls: list[tuple[Any, ...]] = []
-    source = inst.InstallSource(
+    source = InstallSource(
         pip_spec="backlog-atlas-branch/.backlog-atlas/packages/pkg.whl",
         version="2.3.4",
         source_type="bundled-wheel",
@@ -1115,6 +1106,49 @@ def test_bundled_wheel_is_published_to_backlog_branch(
             b"wheel bytes",
             "backlog: bundle Backlog Atlas package",
         )
+    ]
+
+
+def test_bundled_wheel_initializes_backlog_branch_without_markdown(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    calls: list[tuple[Any, ...]] = []
+    source = InstallSource(
+        pip_spec="backlog-atlas-branch/.backlog-atlas/packages/pkg.whl",
+        version="2.3.4",
+        source_type="bundled-wheel",
+        bundled_wheel_path=".backlog-atlas/packages/pkg.whl",
+        bundled_wheel_content=b"wheel bytes",
+    )
+    monkeypatch.setattr(install_github, "github_ref_sha", lambda repo, branch: None)
+
+    def fake_create_tree(repo: str, entries: dict[str, bytes]) -> str:
+        calls.append(("tree", repo, entries))
+        return "tree-sha"
+
+    monkeypatch.setattr(install_github, "create_tree", fake_create_tree)
+    monkeypatch.setattr(
+        install_github,
+        "create_commit",
+        lambda repo, message, tree_sha: calls.append(
+            ("commit", repo, message, tree_sha)
+        )
+        or "commit-sha",
+    )
+    monkeypatch.setattr(
+        install_github,
+        "create_branch_ref",
+        lambda repo, branch, commit_sha: calls.append(
+            ("ref", repo, branch, commit_sha)
+        ),
+    )
+
+    install_github.ensure_backlog_branch_with_bundle("o/r", source)
+
+    assert calls == [
+        ("tree", "o/r", {".backlog-atlas/packages/pkg.whl": b"wheel bytes"}),
+        ("commit", "o/r", "backlog: initialize backlog-atlas branch", "tree-sha"),
+        ("ref", "o/r", "backlog-atlas", "commit-sha"),
     ]
 
 

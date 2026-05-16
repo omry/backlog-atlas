@@ -2,9 +2,6 @@
 # Set done_expire_days to null to keep done items indefinitely.
 done_expire_days: 365
 
-# backlog_filename: BACKLOG.md
-# updates_filename: BACKLOG-UPDATES.md
-
 # Categories control how issues are classified. Each category has:
 #   labels:   GitHub labels that map directly to this category (exact match)
 #   keywords: words/phrases matched against the issue title (word-boundary match)
