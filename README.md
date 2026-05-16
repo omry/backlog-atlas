@@ -16,6 +16,8 @@ This repo's backlog dashboard: <https://omry.github.io/backlog-atlas/>
   the web UI, run updates, and uninstall.
 - [Maintainer Guide](./MAINTAINERS.md) — local development, testing, packaging,
   and release prep for this package.
+- [Design Note](./DESIGN.md) — how snapshots, diffs, and the update log fit
+  together.
 - [Standalone TODO](./STANDALONE-TODO.md) — temporary publication checklist.
 
 ## What It Produces

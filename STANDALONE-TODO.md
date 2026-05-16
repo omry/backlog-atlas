@@ -39,7 +39,7 @@ project.
 
 - [x] Split user-facing usage into `USER-GUIDE.md`.
 - [ ] Add a web UI screenshot.
-- [ ] Optional design note on the snapshot/diff/update-log model so contributors understand the moving parts.
+- [x] Optional design note on the snapshot/diff/update-log model so contributors understand the moving parts.
 
 ## Dogfooding
 
