@@ -829,6 +829,78 @@ def test_web_ui_supports_browser_federated_manifest():
     assert "loadBacklogData" in content
 
 
+def test_dump_atlas_resolves_yaml_config(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+):
+    config = tmp_path / "atlas.yaml"
+    config.write_text(
+        "\n".join(
+            [
+                "title: ${project} Backlog",
+                "project: OmegaConf + Hydra",
+                "base_url: https://example.com/backlogs",
+                "repos:",
+                "  - repo: omry/omegaconf",
+                "    backlog_url: ${base_url}/omegaconf/backlog.json",
+                "  - repo: facebookresearch/hydra",
+                "    url: ${base_url}/hydra/backlog.json",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    out_dir = tmp_path / "site"
+    sys.argv = [
+        "backlog-atlas",
+        "dump-atlas",
+        "--config",
+        str(config),
+        "--output",
+        str(out_dir),
+    ]
+
+    assert ub.main() == 0
+
+    assert json.loads((out_dir / "atlas.json").read_text(encoding="utf-8")) == {
+        "repos": [
+            {
+                "repo": "omry/omegaconf",
+                "backlog_url": "https://example.com/backlogs/omegaconf/backlog.json",
+            },
+            {
+                "repo": "facebookresearch/hydra",
+                "backlog_url": "https://example.com/backlogs/hydra/backlog.json",
+            },
+        ],
+        "title": "OmegaConf + Hydra Backlog",
+    }
+    assert (
+        f"Wrote atlas manifest to {out_dir / 'atlas.json'}" in capsys.readouterr().out
+    )
+
+
+def test_dump_atlas_rejects_invalid_yaml_config(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+):
+    config = tmp_path / "atlas.yaml"
+    config.write_text("repos: []\n", encoding="utf-8")
+    sys.argv = [
+        "backlog-atlas",
+        "dump-atlas",
+        "--config",
+        str(config),
+        "--output",
+        str(tmp_path / "site"),
+    ]
+
+    assert ub.main() == 1
+
+    err = capsys.readouterr().err
+    assert "Backlog Atlas multi-repo config is invalid" in err
+    assert "`repos` must contain at least one repo entry" in err
+
+
 def test_install_help_prefers_repository_url(capsys: pytest.CaptureFixture[str]):
     sys.argv = ["backlog-atlas", "install", "--help"]
 

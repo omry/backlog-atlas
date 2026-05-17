@@ -195,32 +195,35 @@ Then open `http://localhost:8000/`.
 
 ## Browser-Federated Multi-Repo Preview
 
-For a lightweight multi-repo dashboard, place an `atlas.json` file next to
-`index.html`. The browser loads each listed `backlog.json` and merges the
-datasets locally:
+For a lightweight multi-repo dashboard, author an atlas YAML file and compile it
+to `atlas.json` next to `index.html`. The browser loads each listed
+`backlog.json` and merges the datasets locally:
 
-```json
-{
-  "title": "Team Backlog",
-  "repos": [
-    {
-      "repo": "owner/service-a",
-      "backlog_url": "https://owner.github.io/service-a/backlog.json"
-    },
-    {
-      "repo": "owner/service-b",
-      "backlog_url": "https://owner.github.io/service-b/backlog.json"
-    }
-  ]
-}
+```yaml
+title: OmegaConf + Hydra Backlog
+base_url: https://example.com/backlogs
+
+repos:
+  - repo: omry/omegaconf
+    backlog_url: ${base_url}/omegaconf/backlog.json
+  - repo: facebookresearch/hydra
+    backlog_url: ${base_url}/hydra/backlog.json
 ```
 
-If `atlas.json` is not present, the UI falls back to the single-repo
-`backlog.json` behavior. If `atlas.json` exists but is invalid, or one of its
-listed datasets cannot be loaded, the page shows a load error instead of
-silently switching modes. Browser federation is intended for public or otherwise
-browser-readable datasets; it does not add credentials or server-side
-aggregation.
+```sh
+backlog-atlas dump-web --output /tmp/backlog-atlas-preview/
+backlog-atlas dump-atlas \
+  --config .github/backlog-atlas/atlas.yaml \
+  --output /tmp/backlog-atlas-preview/
+```
+
+The YAML is read with OmegaConf, so interpolations such as `${base_url}` are
+resolved before writing the materialized browser JSON. If generated `atlas.json`
+is not present, the UI falls back to the single-repo `backlog.json` behavior. If
+`atlas.json` exists but is invalid, or one of its listed datasets cannot be
+loaded, the page shows a load error instead of silently switching modes. Browser
+federation is intended for public or otherwise browser-readable datasets; it
+does not add credentials or server-side aggregation.
 
 ## Uninstall
 

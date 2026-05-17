@@ -36,8 +36,9 @@ The `backlog-atlas` branch contains:
 - `last_snapshot.json` — internal diff state for the next run.
 - `index.html` — the static dashboard.
 
-The dashboard can also load an optional `atlas.json` manifest next to
+The dashboard can also load a generated `atlas.json` manifest next to
 `index.html` and federate multiple public `backlog.json` files in the browser.
+Author the multi-repo source as YAML, then compile it to the browser manifest.
 
 The default branch only needs the installed workflow, manifest, and config:
 
@@ -76,6 +77,9 @@ backlog-atlas uninstall [flags]
 
 # write the static web UI files for preview or packaging
 backlog-atlas dump-web --output PATH
+
+# compile YAML multi-repo config into atlas.json for the browser UI
+backlog-atlas dump-atlas --config atlas.yaml --output PATH
 
 # refresh backlog data; normally run by the installed GitHub Action
 backlog-atlas update [flags]

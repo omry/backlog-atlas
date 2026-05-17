@@ -11,7 +11,8 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
+from omegaconf.errors import OmegaConfBaseException
 
 from . import config as app_config
 from .errors import UserError
@@ -1016,6 +1017,22 @@ def _add_classify_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_dump_atlas_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--config",
+        required=True,
+        help="YAML multi-repo atlas config to compile into atlas.json.",
+    )
+    parser.add_argument(
+        "--output",
+        required=True,
+        help=(
+            "Output path. If it ends with .json, writes there. "
+            "Otherwise writes atlas.json inside the directory."
+        ),
+    )
+
+
 def remote_config_source(repo: str, branch: str) -> str:
     return f"https://github.com/{repo}@{branch}:{app_config.APP_CONFIG_RELATIVE_PATH}"
 
@@ -1233,6 +1250,77 @@ def run_update(args: argparse.Namespace) -> int:
     return 0
 
 
+def _is_yaml_error(error: Exception) -> bool:
+    return type(error).__module__.split(".", 1)[0] == "yaml"
+
+
+def atlas_config_error(source: Path, message: str) -> UserError:
+    return UserError(
+        f"Backlog Atlas multi-repo config is invalid:\n  {source}\n\n{message}"
+    )
+
+
+def load_atlas_manifest_config(path: Path) -> dict[str, Any]:
+    try:
+        raw = OmegaConf.load(path)
+        data = OmegaConf.to_container(raw, resolve=True)
+    except (OSError, OmegaConfBaseException, ValueError, TypeError) as e:
+        raise atlas_config_error(path, str(e)) from e
+    except Exception as e:
+        if _is_yaml_error(e):
+            raise atlas_config_error(path, str(e)) from e
+        raise
+
+    if not isinstance(data, dict):
+        raise atlas_config_error(path, "top-level YAML value must be a mapping")
+
+    repos = data.get("repos")
+    if not isinstance(repos, list) or not repos:
+        raise atlas_config_error(path, "`repos` must contain at least one repo entry")
+
+    manifest: dict[str, Any] = {"repos": []}
+    title = data.get("title")
+    if title is not None:
+        if not isinstance(title, str) or not title.strip():
+            raise atlas_config_error(path, "`title` must be a non-empty string")
+        manifest["title"] = title
+
+    for index, entry in enumerate(repos, start=1):
+        if not isinstance(entry, dict):
+            raise atlas_config_error(path, f"`repos[{index}]` must be a mapping")
+        repo = entry.get("repo")
+        backlog_url = entry.get("backlog_url") or entry.get("url")
+        if not isinstance(repo, str) or not repo.strip():
+            raise atlas_config_error(
+                path,
+                f"`repos[{index}].repo` must be a non-empty owner/name string",
+            )
+        if not isinstance(backlog_url, str) or not backlog_url.strip():
+            raise atlas_config_error(
+                path,
+                f"`repos[{index}].backlog_url` must be a non-empty string",
+            )
+        manifest["repos"].append({"repo": repo, "backlog_url": backlog_url})
+
+    return manifest
+
+
+def atlas_manifest_output_path(output: str) -> Path:
+    path = Path(output)
+    if path.suffix == ".json":
+        return path
+    return path / "atlas.json"
+
+
+def run_dump_atlas(args: argparse.Namespace) -> int:
+    config_path = Path(args.config)
+    manifest = load_atlas_manifest_config(config_path)
+    output_path = atlas_manifest_output_path(args.output)
+    write_text(output_path, json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    print(f"Wrote atlas manifest to {output_path}", file=sys.stdout)
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="backlog-atlas")
     sub = parser.add_subparsers(dest="cmd")
@@ -1272,6 +1360,11 @@ def main() -> int:
             "Otherwise treated as a directory and all bundled web files are copied in."
         ),
     )
+    p_dump_atlas = sub.add_parser(
+        "dump-atlas",
+        help="Compile YAML multi-repo atlas config into browser atlas.json.",
+    )
+    _add_dump_atlas_args(p_dump_atlas)
 
     args = parser.parse_args()
 
@@ -1286,6 +1379,8 @@ def main() -> int:
             return run_uninstall(args)
         if args.cmd == "dump-web":
             return run_dump_web(args)
+        if args.cmd == "dump-atlas":
+            return run_dump_atlas(args)
     except UserError as e:
         print(f"error: {e}", file=sys.stderr)
         return e.exit_code
