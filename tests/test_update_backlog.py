@@ -525,7 +525,9 @@ def test_initial_update_creates_empty_artifacts(
 
 
 def test_dry_run_does_not_write_updates_jsonl(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ):
     updates_jsonl = tmp_path / "updates.jsonl"
     snapshot_path = tmp_path / "last_snapshot.json"
@@ -568,6 +570,57 @@ def test_dry_run_does_not_write_updates_jsonl(
         ub.main()
 
     assert not updates_jsonl.exists()
+    assert "Config: packaged defaults" in capsys.readouterr().out
+
+
+def test_update_uses_checkout_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    config = tmp_path / ".github" / "backlog-atlas" / "config.yaml"
+    config.parent.mkdir(parents=True)
+    config.write_text(
+        "categories:\n" "  Custom:\n" "    labels: [custom]\n" "    keywords: []\n",
+        encoding="utf-8",
+    )
+    data_json = tmp_path / "backlog.json"
+    snapshot_path = tmp_path / "last_snapshot.json"
+    updates_jsonl = tmp_path / "updates.jsonl"
+
+    monkeypatch.setattr(ub, "fetch_collaborators", lambda repo: set())
+    monkeypatch.setattr(
+        ub,
+        "fetch_open_issues",
+        lambda repo: [
+            {
+                "number": 1,
+                "title": "Custom issue",
+                "body": "",
+                "labels": [{"name": "custom"}],
+                "state": "OPEN",
+                "createdAt": "2024-01-01T00:00:00Z",
+                "updatedAt": "2024-01-01T00:00:00Z",
+            }
+        ],
+    )
+    monkeypatch.setattr(ub, "fetch_open_prs", lambda repo: [])
+    monkeypatch.setattr(ub, "detect_target_root", lambda *a, **kw: tmp_path)
+
+    with patch.object(ub, "resolve_repo", return_value="o/r"):
+        sys.argv = [
+            "backlog-atlas",
+            "update",
+            "--snapshot-path",
+            str(snapshot_path),
+            "--data-json-path",
+            str(data_json),
+            "--updates-jsonl-path",
+            str(updates_jsonl),
+        ]
+        assert ub.main() == 0
+
+    data = json.loads(data_json.read_text(encoding="utf-8"))
+    assert {"category": "Custom", "emoji": "", "count": 1, "percentage": 100.0} in data[
+        "summary"
+    ]["by_category"]
+    assert data["issues"][0]["category"] == "Custom"
 
 
 # ---------------------------------------------------------------------------
@@ -727,8 +780,10 @@ def test_install_writes_workflow_when_missing(
     assert rc == 0
     wf = tmp_path / ".github" / "workflows" / "update-backlog-atlas.yml"
     manifest = tmp_path / ".github" / "backlog-atlas" / "manifest.json"
+    config = tmp_path / ".github" / "backlog-atlas" / "config.yaml"
     assert wf.exists()
     assert manifest.exists()
+    assert config.exists()
     content = wf.read_text(encoding="utf-8")
     assert "BACKLOG_ATLAS_PIP: backlog-atlas==2.0.0" in content
     assert "${{ github.event_name }}" in content
@@ -747,11 +802,11 @@ def test_install_writes_workflow_when_missing(
     }
     assert calls == [
         ("clean", tmp_path, "git"),
-        ("add", tmp_path, [wf, manifest], "git"),
+        ("add", tmp_path, [wf, manifest, config], "git"),
         (
             "commit",
             tmp_path,
-            [wf, manifest],
+            [wf, manifest, config],
             "git",
             "backlog: install Backlog Atlas 2.0.0 workflow",
         ),
@@ -772,7 +827,9 @@ def test_install_defaults_to_pypi_package(
     assert rc == 0
     wf = tmp_path / ".github" / "workflows" / "update-backlog-atlas.yml"
     manifest = tmp_path / ".github" / "backlog-atlas" / "manifest.json"
+    config = tmp_path / ".github" / "backlog-atlas" / "config.yaml"
     assert "BACKLOG_ATLAS_PIP: backlog-atlas==1.2.3" in wf.read_text(encoding="utf-8")
+    assert config.exists()
     manifest_obj = json.loads(manifest.read_text(encoding="utf-8"))
     assert manifest_obj["install"]["install_source"] == "backlog-atlas==1.2.3"
     assert manifest_obj["install"]["installed_version"] == "1.2.3"
@@ -785,6 +842,7 @@ def test_install_leaves_unmatched_existing_workflow_and_metadata_unchanged(
     wf = tmp_path / ".github" / "workflows" / "update-backlog-atlas.yml"
     metadata = tmp_path / ".github" / "backlog-atlas.json"
     manifest = tmp_path / ".github" / "backlog-atlas" / "manifest.json"
+    config = tmp_path / ".github" / "backlog-atlas" / "config.yaml"
     wf.parent.mkdir(parents=True)
     wf.write_text("# preexisting\n", encoding="utf-8")
     calls = _stub_local_install(monkeypatch)
@@ -800,6 +858,7 @@ def test_install_leaves_unmatched_existing_workflow_and_metadata_unchanged(
     assert wf.read_text(encoding="utf-8") == "# preexisting\n"
     assert not metadata.exists()
     assert not manifest.exists()
+    assert not config.exists()
     assert calls == [("clean", tmp_path, "git")]
 
 
@@ -868,11 +927,37 @@ def test_install_cleanup_preserves_unmanaged_metadata_and_manifest(
     assert calls == [("clean", tmp_path, "git")]
 
 
+def test_install_rejects_invalid_existing_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    config = tmp_path / ".github" / "backlog-atlas" / "config.yaml"
+    config.parent.mkdir(parents=True)
+    config.write_text("done_expire_days: not-a-number\n", encoding="utf-8")
+    calls = _stub_local_install(monkeypatch)
+
+    sys.argv = [
+        "backlog-atlas",
+        "install",
+        "--target-root",
+        str(tmp_path),
+    ]
+
+    rc = ub.main()
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "existing Backlog Atlas config is invalid" in err
+    assert str(config) in err
+    assert calls == []
+    assert not (tmp_path / ".github" / "workflows").exists()
+
+
 def test_install_writes_manifest_when_existing_workflow_matches(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     wf = tmp_path / ".github" / "workflows" / "update-backlog-atlas.yml"
     manifest = tmp_path / ".github" / "backlog-atlas" / "manifest.json"
+    config = tmp_path / ".github" / "backlog-atlas" / "config.yaml"
     wf.parent.mkdir(parents=True)
     wf.write_text(
         install_artifacts.load_workflow_template("backlog-atlas==1.2.3"),
@@ -888,13 +973,14 @@ def test_install_writes_manifest_when_existing_workflow_matches(
     rc = ub.main()
     assert rc == 0
     assert manifest.exists()
+    assert config.exists()
     assert calls == [
         ("clean", tmp_path, "git"),
-        ("add", tmp_path, [wf, manifest], "git"),
+        ("add", tmp_path, [wf, manifest, config], "git"),
         (
             "commit",
             tmp_path,
-            [wf, manifest],
+            [wf, manifest, config],
             "git",
             "backlog: install Backlog Atlas 1.2.3 workflow",
         ),
@@ -907,6 +993,7 @@ def test_install_force_reinstalls_when_already_installed(
     wf = tmp_path / ".github" / "workflows" / "update-backlog-atlas.yml"
     metadata = tmp_path / ".github" / "backlog-atlas.json"
     manifest = tmp_path / ".github" / "backlog-atlas" / "manifest.json"
+    config = tmp_path / ".github" / "backlog-atlas" / "config.yaml"
     wf.parent.mkdir(parents=True)
     wf.write_text(
         install_artifacts.load_workflow_template("backlog-atlas==1.2.3"),
@@ -932,13 +1019,14 @@ def test_install_force_reinstalls_when_already_installed(
     assert "Nothing to do" not in out
     assert f"wrote workflow to {wf}" in out
     assert f"wrote install manifest to {manifest}" in out
+    assert f"wrote editable config to {config}" in out
     assert not metadata.exists()
     assert calls == [
-        ("add", tmp_path, [wf, manifest, metadata], "git"),
+        ("add", tmp_path, [wf, manifest, config, metadata], "git"),
         (
             "commit",
             tmp_path,
-            [wf, manifest, metadata],
+            [wf, manifest, config, metadata],
             "git",
             "backlog: install Backlog Atlas 1.2.3 workflow",
         ),
@@ -973,7 +1061,7 @@ def test_install_removes_previous_install_artifacts_before_reinstalling(
         json.dumps({"tool": "backlog-atlas", "schema_version": 1}),
         encoding="utf-8",
     )
-    app_config.write_text("keep: true\n", encoding="utf-8")
+    app_config.write_text("done_expire_days: 30\n", encoding="utf-8")
     calls = _stub_local_install(monkeypatch)
 
     sys.argv = [
@@ -992,6 +1080,7 @@ def test_install_removes_previous_install_artifacts_before_reinstalling(
     assert manifest_obj["tool"] == "backlog-atlas"
     assert manifest_obj["files"]
     assert app_config.exists()
+    assert app_config.read_text(encoding="utf-8") == "done_expire_days: 30\n"
     assert calls == [
         ("clean", tmp_path, "git"),
         ("add", tmp_path, [wf, old_manifest, metadata], "git"),
@@ -1068,6 +1157,7 @@ def test_install_pypi_upgrade_from_bundled_wheel_writes_cleanup_workflow(
     assert rc == 0
     cleanup_content = cleanup_wf.read_text(encoding="utf-8")
     manifest = tmp_path / ".github" / "backlog-atlas" / "manifest.json"
+    config = tmp_path / ".github" / "backlog-atlas" / "config.yaml"
     manifest_obj = json.loads(manifest.read_text(encoding="utf-8"))
     assert ".github/workflows/temporary-backlog-atlas-upgrade-cleanup.yml" in {
         entry["path"] for entry in manifest_obj["files"]
@@ -1076,13 +1166,14 @@ def test_install_pypi_upgrade_from_bundled_wheel_writes_cleanup_workflow(
     assert "BACKLOG_ATLAS_KEEP_PACKAGE" not in cleanup_content
     assert ".backlog-atlas/packages/old.whl" in cleanup_content
     assert "find .backlog-atlas/packages" not in cleanup_content
+    assert config.exists()
     assert calls == [
         ("clean", tmp_path, "git"),
-        ("add", tmp_path, [wf, manifest, cleanup_wf, metadata], "git"),
+        ("add", tmp_path, [wf, manifest, config, cleanup_wf, metadata], "git"),
         (
             "commit",
             tmp_path,
-            [wf, manifest, cleanup_wf, metadata],
+            [wf, manifest, config, cleanup_wf, metadata],
             "git",
             "backlog: install Backlog Atlas 2.0.0 workflow",
         ),
@@ -1140,6 +1231,7 @@ def test_install_updates_managed_existing_workflow_and_manifest(
 ):
     wf = tmp_path / ".github" / "workflows" / "update-backlog-atlas.yml"
     manifest = tmp_path / ".github" / "backlog-atlas" / "manifest.json"
+    config = tmp_path / ".github" / "backlog-atlas" / "config.yaml"
     wf.parent.mkdir(parents=True)
     old_workflow = install_artifacts.load_workflow_template(
         "backlog-atlas==1.2.3"
@@ -1156,13 +1248,14 @@ def test_install_updates_managed_existing_workflow_and_manifest(
     assert rc == 0
     assert "ref: main" not in wf.read_text(encoding="utf-8")
     assert manifest.exists()
+    assert config.exists()
     assert calls == [
         ("clean", tmp_path, "git"),
-        ("add", tmp_path, [wf, manifest], "git"),
+        ("add", tmp_path, [wf, manifest, config], "git"),
         (
             "commit",
             tmp_path,
-            [wf, manifest],
+            [wf, manifest, config],
             "git",
             "backlog: install Backlog Atlas 1.2.3 workflow",
         ),
@@ -1181,15 +1274,17 @@ def test_install_local_checkout_detects_repo_and_adds_workflow(
     assert rc == 0
     wf = tmp_path / ".github" / "workflows" / "update-backlog-atlas.yml"
     manifest = tmp_path / ".github" / "backlog-atlas" / "manifest.json"
+    config = tmp_path / ".github" / "backlog-atlas" / "config.yaml"
     assert wf.exists()
     assert manifest.exists()
+    assert config.exists()
     assert calls == [
         ("clean", tmp_path, "git"),
-        ("add", tmp_path, [wf, manifest], "git"),
+        ("add", tmp_path, [wf, manifest, config], "git"),
         (
             "commit",
             tmp_path,
-            [wf, manifest],
+            [wf, manifest, config],
             "git",
             "backlog: install Backlog Atlas 1.2.3 workflow",
         ),
@@ -1804,6 +1899,7 @@ def test_install_local_target_bundles_local_source(
     )
     wf = target_root / ".github" / "workflows" / "update-backlog-atlas.yml"
     manifest = target_root / ".github" / "backlog-atlas" / "manifest.json"
+    config = target_root / ".github" / "backlog-atlas" / "config.yaml"
     cleanup_wf = (
         target_root
         / ".github"
@@ -1817,13 +1913,14 @@ def test_install_local_target_bundles_local_source(
         "branch": "backlog-atlas",
         "remove": "uninstall",
     } in manifest_obj["files"]
+    assert config.exists()
     assert calls == [
         ("clean", target_root, "git"),
-        ("add", target_root, [wf, manifest], "git"),
+        ("add", target_root, [wf, manifest, config], "git"),
         (
             "commit",
             target_root,
-            [wf, manifest],
+            [wf, manifest, config],
             "git",
             "backlog: install Backlog Atlas workflow from "
             "backlog_atlas-2.3.4-0.gabc123def456.dirty-py3-none-any.whl",
@@ -2039,6 +2136,11 @@ def test_install_remote_dry_run_verifies_repo_without_writing(
         "remote_installed_bundled_package_paths",
         lambda repo, branch: [],
     )
+    monkeypatch.setattr(
+        install_github,
+        "validate_remote_config",
+        lambda repo, branch: False,
+    )
 
     sys.argv = [
         "backlog-atlas",
@@ -2063,6 +2165,7 @@ def test_install_remote_dry_run_verifies_repo_without_writing(
     assert "Would create or update temporary_backlog_atlas_install_pr from main" in out
     assert ".github/workflows/update-backlog-atlas.yml" in out
     assert ".github/backlog-atlas/manifest.json" in out
+    assert ".github/backlog-atlas/config.yaml" in out
     assert ".github/backlog-atlas.json" not in out
 
 
@@ -2091,6 +2194,11 @@ def test_install_remote_dry_run_rejects_missing_write_access(
         install_github,
         "remote_installed_bundled_package_paths",
         lambda repo, branch: [],
+    )
+    monkeypatch.setattr(
+        install_github,
+        "validate_remote_config",
+        lambda repo, branch: False,
     )
 
     sys.argv = [
@@ -2132,6 +2240,11 @@ def test_install_remote_dry_run_explains_missing_repo(
         "remote_installed_bundled_package_paths",
         lambda repo, branch: [],
     )
+    monkeypatch.setattr(
+        install_github,
+        "validate_remote_config",
+        lambda repo, branch: False,
+    )
 
     sys.argv = [
         "backlog-atlas",
@@ -2148,6 +2261,50 @@ def test_install_remote_dry_run_explains_missing_repo(
     assert "GitHub could not find owner/name" in err
     assert "Check the repository URL" in err
     assert "current gh authentication can access it" in err
+
+
+def test_install_remote_config_validation_rejects_invalid_config(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(
+        install_github,
+        "remote_config_text",
+        lambda repo, branch: "done_expire_days: not-a-number\n",
+    )
+
+    with pytest.raises(install_github.UserError) as exc:
+        install_github.validate_remote_config("o/r", "main")
+
+    message = str(exc.value)
+    assert "existing Backlog Atlas config is invalid" in message
+    assert "https://github.com/o/r@main:.github/backlog-atlas/config.yaml" in message
+
+
+def test_install_remote_validates_config_before_bundling(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    source = InstallSource(
+        pip_spec="backlog-atlas-branch/.backlog-atlas/packages/current.whl",
+        version="2.0.0",
+        source_type="bundled-wheel",
+        bundled_wheel_path=".backlog-atlas/packages/current.whl",
+        bundled_wheel_content=b"wheel bytes",
+    )
+
+    monkeypatch.setattr(install_github, "github_default_branch", lambda repo: "main")
+
+    def fail_config(repo: str, branch: str) -> bool:
+        raise install_github.UserError("bad")
+
+    monkeypatch.setattr(install_github, "validate_remote_config", fail_config)
+    monkeypatch.setattr(
+        install_github,
+        "ensure_backlog_branch_with_bundle",
+        lambda repo, install_source: pytest.fail("should validate before bundling"),
+    )
+
+    with pytest.raises(install_github.UserError, match="bad"):
+        install_github.install_remote_workflow("o/r", source, "pr")
 
 
 def test_install_remote_dry_run_local_source_does_not_build_wheel(
@@ -2180,6 +2337,11 @@ def test_install_remote_dry_run_local_source_does_not_build_wheel(
         install_github,
         "remote_installed_bundled_package_paths",
         lambda repo, branch: [],
+    )
+    monkeypatch.setattr(
+        install_github,
+        "validate_remote_config",
+        lambda repo, branch: False,
     )
 
     sys.argv = [
@@ -2294,6 +2456,11 @@ def test_install_remote_pr_writes_workflow_and_manifest(
         "remote_installed_bundled_package_paths",
         lambda repo, branch: [],
     )
+    monkeypatch.setattr(
+        install_github,
+        "validate_remote_config",
+        lambda repo, branch: False,
+    )
 
     install_github.install_remote_workflow(
         "o/r",
@@ -2314,6 +2481,7 @@ def test_install_remote_pr_writes_workflow_and_manifest(
     )
     assert "Writing workflow to temporary_backlog_atlas_install_pr" in out
     assert "Writing install manifest to temporary_backlog_atlas_install_pr" in out
+    assert "Writing editable config to temporary_backlog_atlas_install_pr" in out
     assert (
         "Removed old upgrade cleanup workflow from temporary_backlog_atlas_install_pr"
         in out
@@ -2324,7 +2492,7 @@ def test_install_remote_pr_writes_workflow_and_manifest(
         "temporary_backlog_atlas_install_pr",
         "develop",
     )
-    assert calls[4] == (
+    assert calls[5] == (
         "delete",
         "o/r",
         "temporary_backlog_atlas_install_pr",
@@ -2335,6 +2503,7 @@ def test_install_remote_pr_writes_workflow_and_manifest(
     assert [call[3] for call in put_calls] == [
         ".github/workflows/update-backlog-atlas.yml",
         ".github/backlog-atlas/manifest.json",
+        ".github/backlog-atlas/config.yaml",
     ]
     manifest = json.loads(put_calls[1][4])
     assert manifest["tool"] == "backlog-atlas"
@@ -2348,6 +2517,7 @@ def test_install_remote_pr_writes_workflow_and_manifest(
     assert "ref: main" not in put_calls[0][4]
     assert put_calls[0][5] == "backlog: install Backlog Atlas 1.2.3 workflow"
     assert put_calls[1][5] == "backlog: install Backlog Atlas 1.2.3 workflow"
+    assert put_calls[2][5] == "backlog: install Backlog Atlas 1.2.3 workflow"
     assert calls[-1][:4] == (
         "pr",
         "o/r",
@@ -2401,6 +2571,11 @@ def test_install_remote_pr_skips_upgrade_cleanup_for_fresh_bundled_wheel(
         install_github,
         "remote_installed_bundled_package_paths",
         lambda repo, branch: [],
+    )
+    monkeypatch.setattr(
+        install_github,
+        "validate_remote_config",
+        lambda repo, branch: True,
     )
 
     install_github.install_remote_workflow("o/r", source, "pr")
@@ -2462,6 +2637,11 @@ def test_install_remote_pr_writes_cleanup_when_previous_install_was_bundled(
         "remote_installed_bundled_package_paths",
         lambda repo, branch: [".backlog-atlas/packages/old.whl"],
     )
+    monkeypatch.setattr(
+        install_github,
+        "validate_remote_config",
+        lambda repo, branch: True,
+    )
 
     install_github.install_remote_workflow("o/r", source, "pr")
 
@@ -2512,6 +2692,11 @@ def test_install_remote_push_skips_upgrade_cleanup_without_old_packages(
         "remote_installed_bundled_package_paths",
         lambda repo, branch: [],
     )
+    monkeypatch.setattr(
+        install_github,
+        "validate_remote_config",
+        lambda repo, branch: True,
+    )
 
     install_github.install_remote_workflow("o/r", source, "push")
 
@@ -2554,6 +2739,11 @@ def test_install_remote_push_removes_stale_cleanup_before_updating_workflow(
         install_github,
         "remote_installed_bundled_package_paths",
         lambda repo, branch: [],
+    )
+    monkeypatch.setattr(
+        install_github,
+        "validate_remote_config",
+        lambda repo, branch: True,
     )
 
     install_github.install_remote_workflow("o/r", source, "push")

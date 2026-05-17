@@ -4,6 +4,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+from .. import config as app_config
 from .commands import read_text
 from .constants import (
     APP_CONFIG_RELATIVE_PATH,
@@ -91,6 +92,10 @@ def find_upgrade_cleanup_workflow_target(target_repo_root: Path) -> Path:
 
 def find_install_manifest_target(target_repo_root: Path) -> Path:
     return target_repo_root / INSTALL_MANIFEST_RELATIVE_PATH
+
+
+def find_app_config_target(target_repo_root: Path) -> Path:
+    return target_repo_root / APP_CONFIG_RELATIVE_PATH
 
 
 def build_install_manifest(
@@ -415,10 +420,14 @@ def write_install_artifacts(
     )
     wf_path = find_workflow_target(target_root)
     manifest_path = find_install_manifest_target(target_root)
+    config_path = find_app_config_target(target_root)
     upgrade_cleanup_path = find_upgrade_cleanup_workflow_target(target_root)
     changed_paths = []
     workflow_content = load_workflow_template(install_source.pip_spec)
     include_upgrade_cleanup = bool(cleanup_package_paths)
+
+    if config_path.exists():
+        app_config.validate_config_file(config_path)
 
     if wf_path.exists():
         current_workflow = wf_path.read_text(encoding="utf-8")
@@ -441,6 +450,9 @@ def write_install_artifacts(
         force=force,
     ):
         changed_paths.append(manifest_path)
+    if workflow_matches and not config_path.exists():
+        if write_text_artifact(config_path, app_config.packaged_config_content()):
+            changed_paths.append(config_path)
     if workflow_matches:
         if include_upgrade_cleanup:
             cleanup_content = load_upgrade_cleanup_workflow_template(

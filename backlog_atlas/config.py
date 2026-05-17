@@ -5,6 +5,10 @@ from pathlib import Path
 from typing import cast
 
 from omegaconf import DictConfig, OmegaConf
+from omegaconf.errors import OmegaConfBaseException
+
+from .errors import UserError
+from .install.constants import APP_CONFIG_RELATIVE_PATH
 
 PROJECT_DIR = Path(__file__).resolve().parent
 PACKAGE_CONFIG_PATH = PROJECT_DIR / "config.yaml"
@@ -136,14 +140,74 @@ class BacklogConfig:
     )
 
 
-def load_config() -> DictConfig:
-    defaults = OmegaConf.structured(BacklogConfig)
+@dataclass
+class LoadedConfig:
+    config: DictConfig
+    source: str
+    path: Path | None = None
+
+
+def target_config_path(target_root: Path) -> Path:
+    return target_root / APP_CONFIG_RELATIVE_PATH
+
+
+def packaged_config_content() -> str:
+    return PACKAGE_CONFIG_PATH.read_text(encoding="utf-8")
+
+
+def _base_config() -> DictConfig:
+    cfg = OmegaConf.structured(BacklogConfig)
     if PACKAGE_CONFIG_PATH.exists():
-        return cast(
-            DictConfig,
-            OmegaConf.merge(defaults, OmegaConf.load(PACKAGE_CONFIG_PATH)),
-        )
-    return defaults
+        cfg = OmegaConf.merge(cfg, OmegaConf.load(PACKAGE_CONFIG_PATH))
+    return cast(DictConfig, cfg)
+
+
+def _format_config_error(source: str, error: Exception) -> UserError:
+    return UserError(
+        "existing Backlog Atlas config is invalid:\n"
+        f"  {source}\n\n"
+        f"{error}\n\n"
+        "Fix the config and rerun the command.\n"
+        "To reset to the packaged default, delete or move that config file and "
+        "rerun `backlog-atlas install`."
+    )
+
+
+def merge_config_content(content: str, source: str) -> DictConfig:
+    try:
+        cfg = OmegaConf.merge(_base_config(), OmegaConf.create(content))
+        OmegaConf.to_container(cfg, resolve=False)
+    except (OSError, OmegaConfBaseException, ValueError, TypeError) as e:
+        raise _format_config_error(source, e) from e
+    return cast(DictConfig, cfg)
+
+
+def validate_config_content(content: str, source: str) -> DictConfig:
+    return merge_config_content(content, source)
+
+
+def validate_config_file(path: Path) -> DictConfig:
+    try:
+        content = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as e:
+        raise _format_config_error(str(path), e) from e
+    return validate_config_content(content, str(path))
+
+
+def load_config_with_source(target_root: Path | None = None) -> LoadedConfig:
+    if target_root is not None:
+        config_path = target_config_path(target_root)
+        if config_path.exists():
+            return LoadedConfig(
+                config=validate_config_file(config_path),
+                source=config_path.relative_to(target_root).as_posix(),
+                path=config_path,
+            )
+    return LoadedConfig(config=_base_config(), source="packaged defaults")
+
+
+def load_config(target_root: Path | None = None) -> DictConfig:
+    return load_config_with_source(target_root).config
 
 
 def categories_from_config(cfg: DictConfig) -> dict[str, CategoryConfig]:
@@ -155,9 +219,12 @@ def category_matchers(
 ) -> tuple[dict[str, str], dict[str, list[str]]]:
     categories = categories_from_config(cfg)
     label_to_category: dict[str, str] = {
-        label: cat for cat, c in categories.items() for label in c.labels
+        str(label).lower().strip(): cat
+        for cat, c in categories.items()
+        for label in c.labels
     }
     category_keywords: dict[str, list[str]] = {
-        cat: c.keywords for cat, c in categories.items()
+        cat: [str(keyword).lower().strip() for keyword in c.keywords]
+        for cat, c in categories.items()
     }
     return label_to_category, category_keywords

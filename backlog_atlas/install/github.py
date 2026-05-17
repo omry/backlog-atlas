@@ -5,6 +5,7 @@ import binascii
 import json
 from typing import Any
 
+from .. import config as app_config
 from ..errors import UserError
 from .artifacts import (
     bundled_package_paths_to_cleanup,
@@ -15,6 +16,7 @@ from .artifacts import (
 )
 from .commands import run_gh, try_gh
 from .constants import (
+    APP_CONFIG_RELATIVE_PATH,
     BACKLOG_BRANCH,
     INSTALL_BRANCH,
     INSTALL_MANIFEST_RELATIVE_PATH,
@@ -101,6 +103,22 @@ def remote_installed_bundled_package_paths(repo: str, branch: str) -> list[str]:
         return []
     package_paths = manifest_bundled_package_paths(manifest)
     return package_paths or []
+
+
+def remote_config_text(repo: str, branch: str) -> str | None:
+    return github_file_text(repo, branch, APP_CONFIG_RELATIVE_PATH)
+
+
+def remote_config_source(repo: str, branch: str) -> str:
+    return f"https://github.com/{repo}@{branch}:{APP_CONFIG_RELATIVE_PATH}"
+
+
+def validate_remote_config(repo: str, branch: str) -> bool:
+    content = remote_config_text(repo, branch)
+    if content is None:
+        return False
+    app_config.validate_config_content(content, remote_config_source(repo, branch))
+    return True
 
 
 def put_github_file_bytes(
@@ -330,10 +348,11 @@ def install_remote_workflow(
     repo: str, install_source: InstallSource, delivery: str
 ) -> None:
     print(f"Preparing remote install for {repo}")
-    ensure_backlog_branch_with_bundle(repo, install_source)
     print("Resolving default branch")
     default_branch = github_default_branch(repo)
     print(f"Default branch is {default_branch}")
+    remote_config_exists = validate_remote_config(repo, default_branch)
+    ensure_backlog_branch_with_bundle(repo, install_source)
     old_bundled_package_paths = remote_installed_bundled_package_paths(
         repo,
         default_branch,
@@ -383,6 +402,18 @@ def install_remote_workflow(
             manifest_content,
             commit_message,
         )
+        if not remote_config_exists:
+            print(
+                f"Writing editable config to {default_branch}: "
+                f"{APP_CONFIG_RELATIVE_PATH}"
+            )
+            put_github_file(
+                repo,
+                default_branch,
+                APP_CONFIG_RELATIVE_PATH,
+                app_config.packaged_config_content(),
+                commit_message,
+            )
         write_or_delete_upgrade_cleanup_workflow(
             repo,
             default_branch,
@@ -422,6 +453,18 @@ def install_remote_workflow(
         manifest_content,
         commit_message,
     )
+    if not remote_config_exists:
+        print(
+            f"Writing editable config to {INSTALL_BRANCH}: "
+            f"{APP_CONFIG_RELATIVE_PATH}"
+        )
+        put_github_file(
+            repo,
+            INSTALL_BRANCH,
+            APP_CONFIG_RELATIVE_PATH,
+            app_config.packaged_config_content(),
+            commit_message,
+        )
     write_or_delete_upgrade_cleanup_workflow(
         repo,
         INSTALL_BRANCH,
@@ -438,6 +481,7 @@ def print_remote_install_plan(
     delivery: str,
     default_branch: str,
     cleanup_old_bundled_packages: bool = False,
+    remote_config_exists: bool = False,
 ) -> None:
     print("Dry run: would install Backlog Atlas remotely")
     print("Verified GitHub repository exists and current gh auth can write.")
@@ -468,6 +512,8 @@ def print_remote_install_plan(
         )
     print(f"  - {WORKFLOW_RELATIVE_PATH}")
     print(f"  - {INSTALL_MANIFEST_RELATIVE_PATH}")
+    if not remote_config_exists:
+        print(f"  - {APP_CONFIG_RELATIVE_PATH} (created only if missing)")
     if cleanup_old_bundled_packages:
         print(f"  - {UPGRADE_CLEANUP_WORKFLOW_RELATIVE_PATH}")
     print(
@@ -481,6 +527,7 @@ def run_remote_install(
 ) -> int:
     if dry_run:
         default_branch = verify_remote_install_target(repo)
+        remote_config_exists = validate_remote_config(repo, default_branch)
         cleanup_old_bundled_packages = bool(
             remote_installed_bundled_package_paths(repo, default_branch)
         )
@@ -490,6 +537,7 @@ def run_remote_install(
             delivery,
             default_branch,
             cleanup_old_bundled_packages=cleanup_old_bundled_packages,
+            remote_config_exists=remote_config_exists,
         )
         return 0
 

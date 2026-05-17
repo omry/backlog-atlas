@@ -31,6 +31,7 @@ CategoryConfig = app_config.CategoryConfig
 _DEFAULT_CATEGORIES = app_config._DEFAULT_CATEGORIES
 category_matchers = app_config.category_matchers
 load_config = app_config.load_config
+load_config_with_source = app_config.load_config_with_source
 
 STATUS_ORDER = ["in progress", "community PR", "blocked", "not started", "done"]
 
@@ -926,13 +927,14 @@ def _add_update_args(parser: argparse.ArgumentParser) -> None:
 
 
 def run_update(args: argparse.Namespace) -> int:
-    cfg = load_config()
+    target_root = detect_target_root()
+    loaded_config = load_config_with_source(target_root)
+    cfg = loaded_config.config
     repo = resolve_repo(args.repo)
     cfg.repo = repo
     generated_on = today()
     generated_at = iso_now()
 
-    target_root = detect_target_root()
     state_dir = target_root / ".backlog-atlas"
     snapshot_path = (
         Path(args.snapshot_path)
@@ -1029,6 +1031,7 @@ def run_update(args: argparse.Namespace) -> int:
 
     if args.dry_run:
         print(f"Resolved GitHub repo: {repo}")
+        print(f"Config: {loaded_config.source}")
         print(
             f"{cfg.data_json_filename} would {'change' if data_json_changed else 'remain unchanged'}"
         )

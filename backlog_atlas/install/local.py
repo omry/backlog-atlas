@@ -4,6 +4,7 @@ import os
 import sys
 from pathlib import Path
 
+from .. import config as app_config
 from . import artifacts, github, repo
 from .commands import run_command
 from .constants import BACKLOG_BRANCH
@@ -216,6 +217,10 @@ def print_local_install_plan(
     print("Would write or update:")
     print(f"  - {artifacts.find_workflow_target(target_root)}")
     print(f"  - {artifacts.find_install_manifest_target(target_root)}")
+    print(
+        f"  - {artifacts.find_app_config_target(target_root)} "
+        "(created only if missing)"
+    )
     if cleanup_old_bundled_packages:
         print(f"  - {artifacts.find_upgrade_cleanup_workflow_target(target_root)}")
     print(f"Would add and commit install artifact(s) with {vcs}.")
@@ -235,6 +240,9 @@ def run_local_install(
         install_source,
         old_bundled_package_paths,
     )
+    config_path = artifacts.find_app_config_target(target_root)
+    if config_path.exists():
+        app_config.validate_config_file(config_path)
     if dry_run:
         print_local_install_plan(
             repo_name,
@@ -291,6 +299,8 @@ def run_local_install(
             print(f"workflow already exists at {result.workflow_path}")
         if result.manifest_path in result.changed_paths:
             print(f"wrote install manifest to {result.manifest_path}")
+        if config_path in result.changed_paths:
+            print(f"wrote editable config to {config_path}")
         if result.upgrade_cleanup_path in result.changed_paths:
             if cleanup_package_paths:
                 print(

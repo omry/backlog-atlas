@@ -5,7 +5,8 @@ Backlog Atlas on a GitHub repository.
 
 Backlog Atlas creates a dedicated `backlog-atlas` branch containing a static
 dashboard and machine-readable backlog state. Your default branch only gets the
-workflow that keeps that branch updated and an install manifest used for cleanup.
+workflow that keeps that branch updated, editable config, and an install
+manifest used for cleanup.
 
 ## Requirements
 
@@ -59,6 +60,8 @@ This writes:
 - `.github/backlog-atlas/manifest.json` — the cleanup manifest listing
   installed files, install source, Backlog Atlas version, and whether normal
   uninstall or only clean uninstall removes each file.
+- `.github/backlog-atlas/config.yaml` — editable repository configuration. It is
+  created only if missing; reinstall and upgrade preserve local edits.
 
 Local install requires a clean Git or Sapling working tree. It stages/adds the
 managed install files, creates a local commit containing only those files, and
@@ -95,6 +98,7 @@ would be written. Remote dry runs also show whether the install would use a pull
 request or direct push. Remote dry runs call GitHub read-only to verify the
 repository exists and the current `gh` authentication appears to have write
 access. They do not write files, create branches, commit, or open pull requests.
+If a remote config already exists, install validates it before writing anything.
 
 ## What the Workflow Does
 
@@ -117,6 +121,10 @@ The generated branch contains:
   wheels.
 
 The branch is intentionally machine-owned. It is not meant for hand editing.
+
+The workflow reads `.github/backlog-atlas/config.yaml` from the default branch.
+Edit that file in the repository checkout to customize classification labels,
+title keywords, and retention settings.
 
 ## Enable the Web UI
 
@@ -257,7 +265,8 @@ backlog-atlas install --repo https://github.com/owner/name
 
 This updates the installed workflow and `.github/backlog-atlas/manifest.json` so
 future workflow runs use the upgraded Backlog Atlas source and cleanup uses the
-current install manifest. If the
+current install manifest. It creates `.github/backlog-atlas/config.yaml` if the
+repo does not have one yet. If the
 generated `backlog-atlas` branch already exists, the next workflow run updates
 its machine-generated files in place.
 

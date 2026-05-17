@@ -36,10 +36,11 @@ The `backlog-atlas` branch contains:
 - `last_snapshot.json` — internal diff state for the next run.
 - `index.html` — the static dashboard.
 
-The default branch only needs the installed workflow and manifest:
+The default branch only needs the installed workflow, manifest, and config:
 
 - `.github/workflows/update-backlog-atlas.yml`
 - `.github/backlog-atlas/manifest.json`
+- `.github/backlog-atlas/config.yaml` — editable repository configuration
 
 ## Quick Start
 
