@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .. import config as app_config
 from . import artifacts, github, repo
-from .commands import run_command
+from .commands import run_command, try_command
 from .constants import BACKLOG_BRANCH
 from .models import InstallSource, describe_install_source, install_commit_message
 
@@ -51,6 +51,69 @@ def ensure_worktree_clean(target_root: Path, vcs: str) -> bool:
         )
         return False
     return True
+
+
+def missing_default_branch_commits(
+    target_root: Path, vcs: str
+) -> tuple[str, list[str]] | None:
+    if vcs == "sl":
+        ref = "the default branch"
+        output = try_command(
+            [
+                "sl",
+                "log",
+                "-r",
+                "interestingmaster() % .",
+                "--template",
+                "{node|short} {desc}\\n",
+            ],
+            cwd=target_root,
+        )
+    elif vcs == "git":
+        default_branch = repo.detect_default_branch(target_root, vcs)
+        if not default_branch:
+            return None
+        ref = f"origin/{default_branch}"
+        output = try_command(
+            ["git", "log", "--format=%h %s", "--max-count=3", f"HEAD..{ref}"],
+            cwd=target_root,
+        )
+    else:
+        raise RuntimeError(f"unsupported VCS: {vcs}")
+
+    if output is None:
+        return None
+    commits = [line for line in output.splitlines() if line.strip()]
+    if not commits:
+        return None
+    return ref, commits
+
+
+def ensure_default_branch_current(target_root: Path, vcs: str) -> bool:
+    missing = missing_default_branch_commits(target_root, vcs)
+    if missing is None:
+        return True
+
+    ref, commits = missing
+    print(
+        f"error: {target_root} is missing commits from {ref}; "
+        "update the checkout before installing",
+        file=sys.stderr,
+    )
+    print(f"latest missing commit: {commits[0]}", file=sys.stderr)
+    color = color_enabled()
+    if vcs == "sl":
+        recovery_commands = ["sl pull", "sl rebase -d 'interestingmaster()'"]
+    else:
+        recovery_commands = ["git fetch origin", f"git rebase {ref}"]
+    print(file=sys.stderr)
+    print(
+        style("# Update your checkout, then retry install.", ANSI_DIM, color),
+        file=sys.stderr,
+    )
+    for command in recovery_commands:
+        print(style(command, ANSI_COMMAND, color), file=sys.stderr)
+    return False
 
 
 def add_local_install_files(
@@ -204,11 +267,9 @@ def print_local_install_plan(
     print(f"Target working tree: {target_root}")
     print(f"Workflow would install Backlog Atlas from: {install_source.pip_spec}")
     if force:
-        print(
-            "Would skip the clean working tree requirement because --force was provided."
-        )
+        print("Would skip working tree preflight checks because --force was provided.")
     else:
-        print("Would require a clean working tree.")
+        print("Would require a clean working tree based on the latest default branch.")
     if install_source.bundled_wheel_path:
         action = (
             "Would build and upload bundled wheel"
@@ -263,12 +324,14 @@ def run_local_install(
         return 0
 
     if force:
-        print(f"Skipping working tree cleanliness check for {target_root} (--force)")
+        print(f"Skipping working tree preflight checks for {target_root} (--force)")
     else:
         print(f"Checking working tree at {target_root}")
         if ensure_worktree_clean(target_root, vcs) is False:
             return 1
         print("Working tree is clean")
+        if ensure_default_branch_current(target_root, vcs) is False:
+            return 1
 
     print(f"Target repo: {repo_name}")
     print(f"Target working tree: {target_root}")

@@ -755,6 +755,9 @@ def _stub_local_install(monkeypatch: pytest.MonkeyPatch) -> list[tuple[Any, ...]
     monkeypatch.setattr(install_repo, "detect_repo_from_sl", lambda cwd=None: "o/r")
     monkeypatch.setattr(install_repo, "detect_repo_from_git", lambda cwd=None: None)
     monkeypatch.setattr(install_local, "ensure_worktree_clean", fake_clean)
+    monkeypatch.setattr(
+        install_local, "ensure_default_branch_current", lambda target_root, vcs: True
+    )
     monkeypatch.setattr(install_local, "add_local_install_files", fake_add)
     monkeypatch.setattr(install_local, "commit_local_files", fake_commit)
     monkeypatch.setattr(install_github, "github_pages_configured", lambda repo: False)
@@ -770,6 +773,74 @@ def _stub_installed_pypi(
 ) -> None:
     monkeypatch.setattr(install_sources, "installed_local_source_root", lambda: None)
     monkeypatch.setattr(install_sources, "installed_version", lambda: version)
+
+
+def test_ensure_default_branch_current_rejects_git_checkout_missing_origin_main(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    monkeypatch.setattr(
+        install_repo, "detect_default_branch", lambda target_root, vcs: "main"
+    )
+    monkeypatch.setattr(
+        install_local,
+        "try_command",
+        lambda args, cwd=None: "abc123 backlog: remove temporary cleanup workflow\n",
+    )
+
+    assert install_local.ensure_default_branch_current(tmp_path, "git") is False
+
+    err = capsys.readouterr().err
+    assert f"error: {tmp_path} is missing commits from origin/main" in err
+    assert "pull and rebase before installing" in err
+    assert (
+        "latest missing commit: abc123 backlog: remove temporary cleanup workflow"
+        in err
+    )
+    assert "git fetch origin" in err
+    assert "git rebase origin/main" in err
+
+
+def test_ensure_default_branch_current_rejects_sapling_checkout_missing_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    calls = []
+
+    def fake_try_command(args: list[str], cwd: Path | None = None) -> str:
+        calls.append((args, cwd))
+        return "def456 backlog: remove temporary cleanup workflow\n"
+
+    monkeypatch.setattr(install_local, "try_command", fake_try_command)
+
+    assert install_local.ensure_default_branch_current(tmp_path, "sl") is False
+
+    assert calls == [
+        (
+            [
+                "sl",
+                "log",
+                "-r",
+                "interestingmaster() % .",
+                "--template",
+                "{node|short} {desc}\\n",
+            ],
+            tmp_path,
+        )
+    ]
+    err = capsys.readouterr().err
+    assert f"error: {tmp_path} is missing commits from the default branch" in err
+    assert "sl pull" in err
+    assert "sl rebase -d 'interestingmaster()'" in err
+
+
+def test_ensure_default_branch_current_accepts_current_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(
+        install_repo, "detect_default_branch", lambda target_root, vcs: "main"
+    )
+    monkeypatch.setattr(install_local, "try_command", lambda args, cwd=None: "")
+
+    assert install_local.ensure_default_branch_current(tmp_path, "git") is True
 
 
 def _make_backlog_atlas_checkout(tmp_path: Path) -> Path:
@@ -1510,7 +1581,7 @@ def test_install_force_reinstalls_when_already_installed(
 
     assert rc == 0
     out = capsys.readouterr().out
-    assert "Skipping working tree cleanliness check" in out
+    assert "Skipping working tree preflight checks" in out
     assert "Nothing to do" not in out
     assert f"wrote workflow to {wf}" in out
     assert f"wrote install manifest to {manifest}" in out
@@ -1816,6 +1887,47 @@ def test_install_dirty_worktree_returns_error_without_writing(
     assert not (tmp_path / ".github").exists()
 
 
+def test_install_outdated_default_branch_returns_error_without_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    checks = []
+    monkeypatch.setattr(install_repo, "detect_local_vcs", lambda target_root: "git")
+    monkeypatch.setattr(install_repo, "detect_repo_from_sl", lambda cwd=None: "o/r")
+    monkeypatch.setattr(install_repo, "detect_repo_from_git", lambda cwd=None: None)
+    _stub_installed_pypi(monkeypatch)
+
+    def fake_clean(target_root: Path, vcs: str) -> bool:
+        checks.append(("clean", target_root, vcs))
+        return True
+
+    def fake_current(target_root: Path, vcs: str) -> bool:
+        checks.append(("current", target_root, vcs))
+        return False
+
+    monkeypatch.setattr(
+        install_local,
+        "ensure_worktree_clean",
+        fake_clean,
+    )
+    monkeypatch.setattr(
+        install_local,
+        "ensure_default_branch_current",
+        fake_current,
+    )
+    monkeypatch.setattr(
+        install_local,
+        "add_local_install_files",
+        lambda target_root, artifact_paths, vcs: pytest.fail("should not add files"),
+    )
+
+    sys.argv = ["backlog-atlas", "install", "--target-root", str(tmp_path)]
+
+    assert ub.main() == 1
+
+    assert checks == [("clean", tmp_path, "git"), ("current", tmp_path, "git")]
+    assert not (tmp_path / ".github").exists()
+
+
 def test_install_force_skips_dirty_worktree_check(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ):
@@ -1827,6 +1939,11 @@ def test_install_force_skips_dirty_worktree_check(
         install_local,
         "ensure_worktree_clean",
         lambda target_root, vcs: pytest.fail("should not check worktree cleanliness"),
+    )
+    monkeypatch.setattr(
+        install_local,
+        "ensure_default_branch_current",
+        lambda target_root, vcs: pytest.fail("should not check default branch"),
     )
     monkeypatch.setattr(
         install_repo, "is_on_default_branch", lambda target_root, vcs: None
@@ -1860,7 +1977,7 @@ def test_install_force_skips_dirty_worktree_check(
 
     assert rc == 0
     out = capsys.readouterr().out
-    assert "Skipping working tree cleanliness check" in out
+    assert "Skipping working tree preflight checks" in out
     assert (tmp_path / ".github" / "workflows" / "update-backlog-atlas.yml").exists()
     assert (tmp_path / ".github" / "backlog-atlas" / "manifest.json").exists()
     assert add_calls
@@ -2023,6 +2140,9 @@ def test_install_local_dry_run_prints_plan_without_writing(
     assert "No files would be written and no GitHub calls would be made." in out
     assert "Target repo: o/r" in out
     assert "Workflow would install Backlog Atlas from: backlog-atlas==1.2.3" in out
+    assert (
+        "Would require a clean working tree based on the latest default branch." in out
+    )
     assert str(tmp_path / ".github" / "workflows" / "update-backlog-atlas.yml") in out
     assert str(tmp_path / ".github" / "backlog-atlas" / "manifest.json") in out
     assert not (tmp_path / ".github").exists()
@@ -2055,10 +2175,9 @@ def test_install_local_dry_run_with_force_prints_plan_without_clean_requirement(
     assert rc == 0
     out = capsys.readouterr().out
     assert (
-        "Would skip the clean working tree requirement because --force was provided."
-        in out
+        "Would skip working tree preflight checks because --force was provided." in out
     )
-    assert "Would require a clean working tree." not in out
+    assert "Would require a clean working tree" not in out
     assert not (tmp_path / ".github").exists()
 
 
