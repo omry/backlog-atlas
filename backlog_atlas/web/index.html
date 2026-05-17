@@ -42,7 +42,6 @@
   ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
   :root {
     --left-w: 280px;
-    --right-w: 240px;
     --activity-h: 150px;
   }
   html, body { height: 100%; margin: 0; }
@@ -67,7 +66,7 @@
     flex: 1;
     min-height: 0;
     display: grid;
-    grid-template-columns: var(--left-w) 6px minmax(0, 1fr) 6px var(--right-w);
+    grid-template-columns: var(--left-w) 6px minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr);
     gap: 0;
     padding: 0 1.5rem;
@@ -91,7 +90,6 @@
     height: 100%;
   }
   aside.stats-aside { padding: 0.75rem 0.75rem 0.75rem 0; }
-  aside:not(.stats-aside) { padding: 0.75rem 0 0.75rem 0.75rem; }
   aside {
     font-size: 0.78rem;
     height: 100%;
@@ -367,19 +365,6 @@
     </table>
 
   </main>
-
-  <div class="col-resize" id="right-resize" title="Drag to resize"></div>
-
-  <aside>
-    <div class="box">
-      <h3>Status legend</h3>
-      <table id="status-legend"></table>
-    </div>
-    <div class="box">
-      <h3>Category legend</h3>
-      <table id="category-legend"></table>
-    </div>
-  </aside>
 </div>
 
 <div class="activity-panel" id="activity-panel">
@@ -425,16 +410,6 @@ const state = {
 
 const esc = s => String(s).replace(/[&<>"]/g, c =>
   ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]));
-
-function renderLegends() {
-  document.getElementById("status-legend").innerHTML = STATUS_LEGEND
-    .map(([e, s, m]) => `<tr><td>${e}</td><td><code>${esc(s)}</code></td><td>${esc(m)}</td></tr>`)
-    .join("");
-  const categories = state.categories.length ? state.categories : DEFAULT_CATEGORY_LEGEND.map(([emoji, category]) => ({emoji, category}));
-  document.getElementById("category-legend").innerHTML = categories
-    .map(({emoji, category}) => `<tr><td>${emoji}</td><td><code>${esc(category)}</code></td></tr>`)
-    .join("");
-}
 
 function renderStats() {
   const summary = computeSummary(repoFilteredIssues(), state.categories);
@@ -644,7 +619,7 @@ function bindThemeToggle() {
 
 function bindResetLayout() {
   document.getElementById("reset-layout").addEventListener("click", () => {
-    ["--left-w", "--right-w", "--activity-h"].forEach(v => {
+    ["--left-w", "--activity-h"].forEach(v => {
       localStorage.removeItem("bk-" + v);
       document.documentElement.style.removeProperty(v);
     });
@@ -772,12 +747,10 @@ function showLoadError(error) {
 }
 
 async function init() {
-  renderLegends();
   renderThemeToggle();
   bindThemeToggle();
   bindResetLayout();
   setupResize("left-resize", "--left-w", "x", 1, 160, 480);
-  setupResize("right-resize", "--right-w", "x", -1, 140, 400);
   setupResize("activity-resize", "--activity-h", "y", -1, 60, 600);
   try {
     state.data = await loadBacklogData();
@@ -805,7 +778,6 @@ async function init() {
   }
   document.getElementById("generated-on").textContent = state.data.generated_on;
   document.getElementById("open-total").textContent = state.data.summary.open_total;
-  renderLegends();
   renderStats();
   renderRepoPills();
   renderOpennessPills();
