@@ -106,9 +106,10 @@ def parse_labels(issue: dict[str, Any]) -> list[str]:
 
 
 def _keyword_matches(title: str, keyword: str) -> bool:
-    if keyword == "bug":
-        return bool(re.search(r"(?<![A-Za-z0-9_])bug(?![A-Za-z0-9_])", title))
-    return keyword in title
+    if not keyword:
+        return False
+    pattern = rf"(?<![A-Za-z0-9_]){re.escape(keyword)}(?![A-Za-z0-9_])"
+    return bool(re.search(pattern, title))
 
 
 def classify_issue_category(

@@ -90,6 +90,13 @@ def test_categorize_bug_keyword_in_title():
     )
 
 
+def test_categorize_keyword_does_not_match_inside_word():
+    assert (
+        ub.categorize_issue(_issue([], title="official response needed"), _L2C, _KW)
+        == "Enhancement"
+    )
+
+
 def test_categorize_enhancement_fallback():
     assert ub.categorize_issue(_issue([]), _L2C, _KW) == "Enhancement"
 
