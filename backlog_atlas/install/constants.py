@@ -17,6 +17,7 @@ UPGRADE_CLEANUP_WORKFLOW_RELATIVE_PATH = (
 INSTALL_METADATA_RELATIVE_PATH = ".github/backlog-atlas.json"
 INSTALL_MANIFEST_RELATIVE_PATH = ".github/backlog-atlas/manifest.json"
 APP_CONFIG_RELATIVE_PATH = ".github/backlog-atlas/config.yaml"
+ATLAS_CONFIG_RELATIVE_PATH = ".github/backlog-atlas/atlas.yaml"
 INSTALL_MANIFEST_SCHEMA_VERSION = 1
 INSTALL_BRANCH = "temporary_backlog_atlas_install_pr"
 BUNDLED_PACKAGE_DIR = ".backlog-atlas/packages"

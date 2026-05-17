@@ -8,6 +8,7 @@ from .. import config as app_config
 from .commands import read_text
 from .constants import (
     APP_CONFIG_RELATIVE_PATH,
+    ATLAS_CONFIG_RELATIVE_PATH,
     BACKLOG_BRANCH,
     BUNDLED_PACKAGE_DIR,
     INSTALL_MANIFEST_RELATIVE_PATH,
@@ -137,6 +138,12 @@ def install_manifest_entries(
         },
         {
             "path": APP_CONFIG_RELATIVE_PATH,
+            "branch": "default",
+            "remove": "clean",
+            "optional": True,
+        },
+        {
+            "path": ATLAS_CONFIG_RELATIVE_PATH,
             "branch": "default",
             "remove": "clean",
             "optional": True,

@@ -195,9 +195,26 @@ Then open `http://localhost:8000/`.
 
 ## Browser-Federated Multi-Repo Preview
 
-For a lightweight multi-repo dashboard, author an atlas YAML file and compile it
-to `atlas.json` next to `index.html`. The browser loads each listed
-`backlog.json` and merges the datasets locally:
+For a lightweight multi-repo dashboard, track repos in
+`.github/backlog-atlas/atlas.yaml`. The installed workflow compiles this YAML to
+`atlas.json` next to `index.html`; the browser loads each listed `backlog.json`
+and merges the datasets locally.
+
+Use the CLI for simple published URLs:
+
+```sh
+backlog-atlas atlas add omry/omegaconf
+backlog-atlas atlas add facebookresearch/hydra \
+  --backlog-url https://facebookresearch.github.io/hydra/backlog.json
+backlog-atlas atlas list
+backlog-atlas atlas remove facebookresearch/hydra
+```
+
+Without `--backlog-url`, `atlas add` defaults to
+`https://OWNER.github.io/REPO/backlog.json`.
+
+Edit the YAML directly when you want OmegaConf interpolation or separate local
+and published URLs:
 
 ```yaml
 title: OmegaConf + Hydra Backlog
@@ -229,6 +246,10 @@ The YAML is read with OmegaConf, so interpolations such as
 `${urls.${target}.omegaconf}` are resolved before writing the materialized
 browser JSON. `BACKLOG_ATLAS_TARGET=local` lets you test local files before
 publishing; leaving it unset emits the published URLs.
+
+After `atlas.yaml` is committed, the installed workflow publishes `atlas.json`
+on the next run. If `atlas.yaml` is removed, the workflow removes stale
+`atlas.json` and the UI returns to single-repo mode.
 
 To generate local datasets for the preview, run `backlog-atlas update` from each
 repository checkout and point its output at the matching preview subdirectory:

@@ -789,11 +789,13 @@ def test_workflow_template_substitutes_install_source():
     assert 'pip install "$BACKLOG_ATLAS_PIP"' in out
     assert "backlog-atlas update" in out
     assert "backlog-atlas dump-web" in out
+    assert "backlog-atlas dump-atlas" in out
     assert "ensure-backlog-branch:" in out
     assert "needs: ensure-backlog-branch" in out
     assert ".backlog-atlas/.keep" in out
     assert "git rm --ignore-unmatch BACKLOG.md BACKLOG-UPDATES.md" in out
     assert "git add BACKLOG.md" not in out
+    assert "git rm --ignore-unmatch atlas.json" in out
     assert "cp BACKLOG.md" not in out
     assert "Seed backlog files for tool" not in out
     assert "log-event:" not in out
@@ -901,6 +903,115 @@ def test_dump_atlas_rejects_invalid_yaml_config(
     assert "`repos` must contain at least one repo entry" in err
 
 
+def test_atlas_cli_add_list_and_remove_repos(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+):
+    config = tmp_path / "atlas.yaml"
+
+    sys.argv = [
+        "backlog-atlas",
+        "atlas",
+        "add",
+        "https://github.com/omry/omegaconf",
+        "--config",
+        str(config),
+    ]
+    assert ub.main() == 0
+
+    sys.argv = [
+        "backlog-atlas",
+        "atlas",
+        "add",
+        "facebookresearch/hydra",
+        "--backlog-url",
+        "https://example.com/hydra/backlog.json",
+        "--config",
+        str(config),
+    ]
+    assert ub.main() == 0
+
+    assert ub.load_atlas_manifest_config(config) == {
+        "repos": [
+            {
+                "repo": "omry/omegaconf",
+                "backlog_url": "https://omry.github.io/omegaconf/backlog.json",
+            },
+            {
+                "repo": "facebookresearch/hydra",
+                "backlog_url": "https://example.com/hydra/backlog.json",
+            },
+        ]
+    }
+
+    sys.argv = [
+        "backlog-atlas",
+        "atlas",
+        "list",
+        "--config",
+        str(config),
+    ]
+    assert ub.main() == 0
+    out = capsys.readouterr().out
+    assert "omry/omegaconf" in out
+    assert "facebookresearch/hydra" in out
+
+    sys.argv = [
+        "backlog-atlas",
+        "atlas",
+        "remove",
+        "omry/omegaconf",
+        "--config",
+        str(config),
+    ]
+    assert ub.main() == 0
+    assert ub.load_atlas_manifest_config(config) == {
+        "repos": [
+            {
+                "repo": "facebookresearch/hydra",
+                "backlog_url": "https://example.com/hydra/backlog.json",
+            }
+        ]
+    }
+
+    sys.argv = [
+        "backlog-atlas",
+        "atlas",
+        "remove",
+        "facebookresearch/hydra",
+        "--config",
+        str(config),
+    ]
+    assert ub.main() == 0
+    assert not config.exists()
+
+
+def test_atlas_cli_rejects_duplicate_repo(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+):
+    config = tmp_path / "atlas.yaml"
+    sys.argv = [
+        "backlog-atlas",
+        "atlas",
+        "add",
+        "omry/omegaconf",
+        "--config",
+        str(config),
+    ]
+    assert ub.main() == 0
+
+    sys.argv = [
+        "backlog-atlas",
+        "atlas",
+        "add",
+        "https://github.com/omry/omegaconf",
+        "--config",
+        str(config),
+    ]
+    assert ub.main() == 1
+
+    assert "omry/omegaconf is already tracked" in capsys.readouterr().err
+
+
 def test_install_help_prefers_repository_url(capsys: pytest.CaptureFixture[str]):
     sys.argv = ["backlog-atlas", "install", "--help"]
 
@@ -995,6 +1106,7 @@ def test_install_writes_workflow_when_missing(
         ".github/workflows/update-backlog-atlas.yml": "uninstall",
         ".github/backlog-atlas/manifest.json": "uninstall",
         ".github/backlog-atlas/config.yaml": "clean",
+        ".github/backlog-atlas/atlas.yaml": "clean",
     }
     assert calls == [
         ("clean", tmp_path, "git"),

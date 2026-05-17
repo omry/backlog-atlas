@@ -81,6 +81,11 @@ backlog-atlas dump-web --output PATH
 # compile YAML multi-repo config into atlas.json for the browser UI
 backlog-atlas dump-atlas --config atlas.yaml --output PATH
 
+# manage repos tracked by .github/backlog-atlas/atlas.yaml
+backlog-atlas atlas list
+backlog-atlas atlas add owner/name [--backlog-url URL]
+backlog-atlas atlas remove owner/name
+
 # refresh backlog data; normally run by the installed GitHub Action
 backlog-atlas update [flags]
 

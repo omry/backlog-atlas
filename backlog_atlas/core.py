@@ -23,7 +23,8 @@ from .install.cli import (
     run_uninstall,
 )
 from .install.commands import read_text, run_gh
-from .install.repo import detect_target_root, resolve_repo
+from .install.constants import ATLAS_CONFIG_RELATIVE_PATH
+from .install.repo import detect_target_root, normalize_github_repo, resolve_repo
 
 PROJECT_DIR = Path(__file__).resolve().parent
 WEB_DIR = PROJECT_DIR / "web"
@@ -1033,6 +1034,44 @@ def _add_dump_atlas_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_atlas_config_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--config",
+        help=(
+            f"Atlas YAML config path. Defaults to {ATLAS_CONFIG_RELATIVE_PATH} "
+            "in the detected checkout."
+        ),
+    )
+
+
+def _add_atlas_args(parser: argparse.ArgumentParser) -> None:
+    sub = parser.add_subparsers(dest="atlas_cmd", required=True)
+
+    p_list = sub.add_parser("list", help="List repos tracked by atlas.yaml.")
+    _add_atlas_config_arg(p_list)
+
+    p_add = sub.add_parser("add", help="Add a repo to atlas.yaml.")
+    p_add.add_argument(
+        "repo",
+        help="GitHub repository URL or owner/name shorthand to add.",
+    )
+    p_add.add_argument(
+        "--backlog-url",
+        help=(
+            "Published backlog.json URL. Defaults to "
+            "https://OWNER.github.io/REPO/backlog.json."
+        ),
+    )
+    _add_atlas_config_arg(p_add)
+
+    p_remove = sub.add_parser("remove", help="Remove a repo from atlas.yaml.")
+    p_remove.add_argument(
+        "repo",
+        help="GitHub repository URL or owner/name shorthand to remove.",
+    )
+    _add_atlas_config_arg(p_remove)
+
+
 def remote_config_source(repo: str, branch: str) -> str:
     return f"https://github.com/{repo}@{branch}:{app_config.APP_CONFIG_RELATIVE_PATH}"
 
@@ -1260,6 +1299,165 @@ def atlas_config_error(source: Path, message: str) -> UserError:
     )
 
 
+def atlas_config_path(config: str | None) -> Path:
+    if config:
+        return Path(config)
+    return detect_target_root() / ATLAS_CONFIG_RELATIVE_PATH
+
+
+def load_mutable_atlas_config(path: Path, create: bool = False) -> DictConfig | None:
+    if not path.exists():
+        if not create:
+            return None
+        return OmegaConf.create({"repos": []})
+    try:
+        raw = OmegaConf.load(path)
+    except (OSError, OmegaConfBaseException, ValueError, TypeError) as e:
+        raise atlas_config_error(path, str(e)) from e
+    except Exception as e:
+        if _is_yaml_error(e):
+            raise atlas_config_error(path, str(e)) from e
+        raise
+    if not isinstance(raw, DictConfig):
+        raise atlas_config_error(path, "top-level YAML value must be a mapping")
+    repos = raw.get("repos")
+    if repos is None:
+        raw.repos = []
+    elif not OmegaConf.is_list(repos):
+        raise atlas_config_error(path, "`repos` must be a list")
+    return raw
+
+
+def atlas_repo_entries(config: DictConfig, path: Path) -> list[dict[str, str]]:
+    data = OmegaConf.to_container(config, resolve=False)
+    if not isinstance(data, dict):
+        raise atlas_config_error(path, "top-level YAML value must be a mapping")
+    repos = data.get("repos") or []
+    if not isinstance(repos, list):
+        raise atlas_config_error(path, "`repos` must be a list")
+
+    entries = []
+    for index, entry in enumerate(repos, start=1):
+        if not isinstance(entry, dict):
+            raise atlas_config_error(path, f"`repos[{index}]` must be a mapping")
+        repo = entry.get("repo")
+        backlog_url = entry.get("backlog_url") or entry.get("url")
+        if not isinstance(repo, str) or not repo.strip():
+            raise atlas_config_error(
+                path,
+                f"`repos[{index}].repo` must be a non-empty owner/name string",
+            )
+        if not isinstance(backlog_url, str) or not backlog_url.strip():
+            raise atlas_config_error(
+                path,
+                f"`repos[{index}].backlog_url` must be a non-empty string",
+            )
+        entries.append({"repo": repo, "backlog_url": backlog_url})
+    return entries
+
+
+def default_atlas_backlog_url(repo: str) -> str:
+    owner, name = repo.split("/", 1)
+    return f"https://{owner}.github.io/{name}/backlog.json"
+
+
+def save_atlas_config(path: Path, config: DictConfig) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    OmegaConf.save(config=config, f=path, resolve=False)
+
+
+def normalize_atlas_repo_arg(repo_or_url: str) -> str:
+    repo = normalize_github_repo(repo_or_url)
+    if repo:
+        return repo
+    raise UserError(
+        "unsupported repo value; expected a GitHub repository URL like "
+        "https://github.com/owner/name or the shorthand owner/name"
+    )
+
+
+def run_atlas_list(args: argparse.Namespace) -> int:
+    path = atlas_config_path(args.config)
+    config = load_mutable_atlas_config(path)
+    if config is None:
+        print(f"No tracked repos (atlas config not found: {path})")
+        return 0
+    entries = atlas_repo_entries(config, path)
+    if not entries:
+        print(f"No tracked repos in {path}")
+        return 0
+    print(f"Tracked repos in {path}:")
+    for entry in entries:
+        print(f"- {entry['repo']}  {entry['backlog_url']}")
+    return 0
+
+
+def run_atlas_add(args: argparse.Namespace) -> int:
+    path = atlas_config_path(args.config)
+    config = load_mutable_atlas_config(path, create=True)
+    assert config is not None
+    repo = normalize_atlas_repo_arg(args.repo)
+    entries = atlas_repo_entries(config, path)
+    if any(normalize_github_repo(entry["repo"]) == repo for entry in entries):
+        raise UserError(f"{repo} is already tracked in {path}")
+
+    config.repos.append(
+        {
+            "repo": repo,
+            "backlog_url": args.backlog_url or default_atlas_backlog_url(repo),
+        }
+    )
+    save_atlas_config(path, config)
+    print(f"Added {repo} to {path}")
+    return 0
+
+
+def run_atlas_remove(args: argparse.Namespace) -> int:
+    path = atlas_config_path(args.config)
+    config = load_mutable_atlas_config(path)
+    if config is None:
+        raise UserError(f"atlas config was not found: {path}")
+    repo = normalize_atlas_repo_arg(args.repo)
+    data = OmegaConf.to_container(config, resolve=False)
+    if not isinstance(data, dict):
+        raise atlas_config_error(path, "top-level YAML value must be a mapping")
+    repos = data.get("repos") or []
+    if not isinstance(repos, list):
+        raise atlas_config_error(path, "`repos` must be a list")
+
+    remaining = []
+    removed = False
+    for entry in repos:
+        if not isinstance(entry, dict):
+            raise atlas_config_error(path, "`repos` entries must be mappings")
+        if normalize_github_repo(str(entry.get("repo") or "")) == repo:
+            removed = True
+            continue
+        remaining.append(entry)
+    if not removed:
+        raise UserError(f"{repo} is not tracked in {path}")
+
+    if remaining:
+        config.repos = remaining
+        save_atlas_config(path, config)
+        print(f"Removed {repo} from {path}")
+    else:
+        path.unlink()
+        print(f"Removed {repo} from {path}")
+        print(f"Removed empty atlas config {path}")
+    return 0
+
+
+def run_atlas(args: argparse.Namespace) -> int:
+    if args.atlas_cmd == "list":
+        return run_atlas_list(args)
+    if args.atlas_cmd == "add":
+        return run_atlas_add(args)
+    if args.atlas_cmd == "remove":
+        return run_atlas_remove(args)
+    raise RuntimeError(f"unsupported atlas command: {args.atlas_cmd}")
+
+
 def load_atlas_manifest_config(path: Path) -> dict[str, Any]:
     try:
         raw = OmegaConf.load(path)
@@ -1365,6 +1563,11 @@ def main() -> int:
         help="Compile YAML multi-repo atlas config into browser atlas.json.",
     )
     _add_dump_atlas_args(p_dump_atlas)
+    p_atlas = sub.add_parser(
+        "atlas",
+        help="Manage repos tracked by the multi-repo atlas config.",
+    )
+    _add_atlas_args(p_atlas)
 
     args = parser.parse_args()
 
@@ -1381,6 +1584,8 @@ def main() -> int:
             return run_dump_web(args)
         if args.cmd == "dump-atlas":
             return run_dump_atlas(args)
+        if args.cmd == "atlas":
+            return run_atlas(args)
     except UserError as e:
         print(f"error: {e}", file=sys.stderr)
         return e.exit_code
