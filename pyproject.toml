@@ -9,6 +9,16 @@ description = "Generate a self-hosted backlog snapshot and dashboard for maintai
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
 dependencies = [
     "omegaconf>=2.3",
 ]
@@ -44,6 +54,6 @@ target-version = ["py310"]
 testpaths = ["tests"]
 
 [tool.mypy]
-files = ["backlog_atlas", "tests"]
+files = ["backlog_atlas", "tests", "tools"]
 python_version = "3.10"
 warn_unused_configs = true

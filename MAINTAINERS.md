@@ -89,13 +89,13 @@ The committed tool config lives in `pyproject.toml`.
 Check formatting:
 
 ```sh
-python -m black --check backlog_atlas tests
+python -m black --check backlog_atlas tests tools
 ```
 
 Run the current lightweight linter:
 
 ```sh
-python -m pyflakes backlog_atlas tests
+python -m pyflakes backlog_atlas tests tools
 ```
 
 Run type checking:
@@ -212,19 +212,32 @@ wheel path.
 
 ## Publishing
 
-Publishing is handled by GitHub Releases and PyPI Trusted Publishing. The
-release workflow reruns lint, formatting, tests, and package build checks before
-uploading distributions to PyPI.
+Publishing is handled by `tools/publish_version.py`, GitHub Releases, and PyPI
+Trusted Publishing. The release workflow reruns lint, formatting, tests, and
+package build checks before uploading distributions to PyPI.
 
-Before publishing:
+Add user-facing notes under `CHANGELOG.md`'s `Unreleased` section, then run:
 
-1. Bump `version` in `pyproject.toml`.
-2. Move the pending notes in `CHANGELOG.md` under the new version.
-3. Run `python -m pytest`.
-4. Run `python -m build --wheel --sdist`.
-5. Commit and push.
-6. Publish a GitHub Release using the `CHANGELOG.md` entry as the release
-   notes source.
+```sh
+python tools/publish_version.py
+```
+
+The script prints the current version, suggests the next version, asks for
+confirmation, moves `CHANGELOG.md` notes under the release version, bumps
+`pyproject.toml`, runs local checks, builds distributions, commits, pushes, and
+creates the GitHub Release that triggers PyPI publishing.
+
+To choose a version explicitly:
+
+```sh
+python tools/publish_version.py 0.12
+```
+
+To preview without changing files or publishing:
+
+```sh
+python tools/publish_version.py --dry-run
+```
 
 PyPI must have a Trusted Publisher configured for:
 

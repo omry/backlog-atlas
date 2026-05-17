@@ -1,5 +1,10 @@
 # Backlog Atlas
 
+[![PyPI](https://img.shields.io/pypi/v/backlog-atlas.svg)](https://pypi.org/project/backlog-atlas/)
+[![Python versions](https://img.shields.io/pypi/pyversions/backlog-atlas.svg)](https://pypi.org/project/backlog-atlas/)
+[![Publish to PyPI](https://github.com/omry/backlog-atlas/actions/workflows/publish.yml/badge.svg)](https://github.com/omry/backlog-atlas/actions/workflows/publish.yml)
+[![License](https://img.shields.io/pypi/l/backlog-atlas.svg)](./LICENSE)
+
 Backlog Atlas generates a self-hosted backlog snapshot and static dashboard for
 GitHub repository maintainers.
 
@@ -72,8 +77,8 @@ Maintainers can install local check tools with:
 
 ```sh
 python -m pip install -e ".[dev]"
-python -m black --check backlog_atlas tests
-python -m pyflakes backlog_atlas tests
+python -m black --check backlog_atlas tests tools
+python -m pyflakes backlog_atlas tests tools
 python -m mypy
 python -m pytest
 ```

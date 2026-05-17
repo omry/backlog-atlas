@@ -126,8 +126,8 @@ development tools with `python -m pip install -e ".[dev]"`, then:
 
 - Keep Python formatted with `black` style.
 - Keep imports compatible with `isort`'s default style.
-- Run `python -m black --check backlog_atlas tests` for formatting.
-- Run `python -m pyflakes backlog_atlas tests` for lightweight linting.
+- Run `python -m black --check backlog_atlas tests tools` for formatting.
+- Run `python -m pyflakes backlog_atlas tests tools` for lightweight linting.
 - Run `python -m mypy` for type checking.
 - Run `pytest tests/test_update_backlog.py` after code changes.
 - If adding lint or type-check tooling, document the commands in `README.md` and

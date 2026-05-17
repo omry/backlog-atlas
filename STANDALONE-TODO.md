@@ -25,7 +25,7 @@ project.
   Current local practice is Black style plus `pyflakes`.
 - [x] Add type-checking config and run it in CI.
 - [x] Add lint to CI.
-- [x] CI runs tests on Python 3.10-3.13 and builds wheel/sdist.
+- [x] CI runs tests on Python 3.10-3.14 and builds wheel/sdist.
 - [x] PyPI publishing workflow using Trusted Publishing from GitHub Releases.
 - [x] Add a changelog or release-note mechanism.
 
@@ -51,7 +51,7 @@ project.
 - [x] Confirm PyPI Trusted Publisher is configured for repository
   `omry/backlog-atlas`, workflow `publish.yml`, environment `pypi`.
 - [x] Run the required GitHub Action CI checks before publishing.
-- [ ] Make release a single-step process.
+- [x] Make release a single-step process.
 
 ## Cleanup
 

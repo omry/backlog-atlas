@@ -21,9 +21,9 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
       - name: Check formatting
-        run: python -m black --check backlog_atlas tests
+        run: python -m black --check backlog_atlas tests tools
       - name: Run pyflakes
-        run: python -m pyflakes backlog_atlas tests
+        run: python -m pyflakes backlog_atlas tests tools
       - name: Run mypy
         run: python -m mypy
 
@@ -33,7 +33,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
