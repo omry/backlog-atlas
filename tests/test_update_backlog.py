@@ -624,6 +624,116 @@ def test_update_uses_checkout_config(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
 
 # ---------------------------------------------------------------------------
+# classify
+# ---------------------------------------------------------------------------
+
+
+def test_classify_checkout_uses_local_config_edits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    config = tmp_path / ".github" / "backlog-atlas" / "config.yaml"
+    config.parent.mkdir(parents=True)
+    config.write_text(
+        "categories:\n" "  Custom:\n" "    labels: [custom]\n" "    keywords: []\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(ub, "detect_target_root", lambda *a, **kw: tmp_path)
+    monkeypatch.setattr(ub, "resolve_repo", lambda explicit, cwd=None: "o/r")
+    monkeypatch.setattr(
+        ub,
+        "fetch_issue",
+        lambda repo, number: {
+            "number": number,
+            "title": "Custom classification",
+            "labels": [{"name": "custom"}],
+        },
+    )
+
+    sys.argv = ["backlog-atlas", "classify", "123"]
+
+    rc = ub.main()
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Mode: checkout" in out
+    assert "Repo: o/r" in out
+    assert "Config: .github/backlog-atlas/config.yaml" in out
+    assert "Issue: #123 Custom classification" in out
+    assert "Category: Custom" in out
+    assert 'Reason: label "custom" matched categories.Custom.labels' in out
+
+
+def test_classify_remote_uses_remote_config(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    monkeypatch.setattr(install_github, "github_default_branch", lambda repo: "main")
+    monkeypatch.setattr(
+        install_github,
+        "github_file_text",
+        lambda repo, branch, path: (
+            "categories:\n" "  Remote:\n" "    labels: [remote]\n" "    keywords: []\n"
+        ),
+    )
+    monkeypatch.setattr(
+        ub,
+        "fetch_issue",
+        lambda repo, number: {
+            "number": number,
+            "title": "Remote classification",
+            "labels": [{"name": "remote"}],
+        },
+    )
+
+    sys.argv = [
+        "backlog-atlas",
+        "classify",
+        "#123",
+        "--repo",
+        "https://github.com/o/r",
+    ]
+
+    rc = ub.main()
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Mode: remote" in out
+    assert "Repo: o/r" in out
+    assert (
+        "Config: https://github.com/o/r@main:.github/backlog-atlas/config.yaml" in out
+    )
+    assert "Category: Remote" in out
+
+
+def test_classify_remote_rejects_missing_remote_config(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    monkeypatch.setattr(install_github, "github_default_branch", lambda repo: "main")
+    monkeypatch.setattr(
+        install_github, "github_file_text", lambda repo, branch, path: None
+    )
+    monkeypatch.setattr(
+        ub,
+        "fetch_issue",
+        lambda repo, number: pytest.fail("should not fetch issue without config"),
+    )
+
+    sys.argv = [
+        "backlog-atlas",
+        "classify",
+        "123",
+        "--repo",
+        "https://github.com/o/r",
+    ]
+
+    rc = ub.main()
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "remote Backlog Atlas config was not found" in err
+    assert "Remote classification uses the config committed" in err
+
+
+# ---------------------------------------------------------------------------
 # install / uninstall
 # ---------------------------------------------------------------------------
 

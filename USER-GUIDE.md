@@ -155,6 +155,27 @@ Useful flags:
 
 By default, local output goes under `.backlog-atlas/` in the detected checkout.
 
+## Classify One Issue
+
+To test config edits from a checkout, run:
+
+```sh
+backlog-atlas classify 123
+```
+
+Checkout mode uses `.github/backlog-atlas/config.yaml` from the working tree,
+including uncommitted edits.
+
+To classify with the config already committed to a remote repository's default
+branch, pass `--repo`:
+
+```sh
+backlog-atlas classify 123 --repo https://github.com/owner/name
+```
+
+Remote mode intentionally uses only the remote config. It does not inspect local
+config files.
+
 ## Preview Locally
 
 To preview the web UI on your machine:

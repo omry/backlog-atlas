@@ -76,6 +76,9 @@ backlog-atlas dump-web --output PATH
 
 # refresh backlog data; normally run by the installed GitHub Action
 backlog-atlas update [flags]
+
+# explain how one issue is classified by the active config
+backlog-atlas classify ISSUE_NUMBER [--repo URL]
 ```
 
 ## Development Checks

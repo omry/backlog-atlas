@@ -6,6 +6,7 @@ import json
 import re
 import sys
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -32,8 +33,15 @@ _DEFAULT_CATEGORIES = app_config._DEFAULT_CATEGORIES
 category_matchers = app_config.category_matchers
 load_config = app_config.load_config
 load_config_with_source = app_config.load_config_with_source
+validate_config_content = app_config.validate_config_content
 
 STATUS_ORDER = ["in progress", "community PR", "blocked", "not started", "done"]
+
+
+@dataclass
+class CategoryClassification:
+    category: str
+    reason: str
 
 
 def split_repo(repo: str) -> tuple[str, str]:
@@ -101,23 +109,46 @@ def _keyword_matches(title: str, keyword: str) -> bool:
     return keyword in title
 
 
-def categorize_issue(
+def classify_issue_category(
     issue: dict[str, Any],
     label_to_category: dict[str, str],
     category_keywords: dict[str, list[str]],
-) -> str:
-    labels = [label.lower().strip() for label in parse_labels(issue)]
-    for label in labels:
+) -> CategoryClassification:
+    labels = parse_labels(issue)
+    for raw_label in labels:
+        label = raw_label.lower().strip()
         if label in label_to_category:
-            return label_to_category[label]
+            category = label_to_category[label]
+            return CategoryClassification(
+                category=category,
+                reason=f'label "{raw_label}" matched categories.{category}.labels',
+            )
 
     # Fallback classification uses the title only — issue bodies contain generic
     # triage wording that makes body-based matching too noisy.
     title = (issue.get("title") or "").lower()
     for category, keywords in category_keywords.items():
-        if any(_keyword_matches(title, kw) for kw in keywords):
-            return category
-    return "Enhancement"
+        for keyword in keywords:
+            if _keyword_matches(title, keyword):
+                return CategoryClassification(
+                    category=category,
+                    reason=(
+                        f'title keyword "{keyword}" matched '
+                        f"categories.{category}.keywords"
+                    ),
+                )
+    return CategoryClassification(
+        category="Enhancement",
+        reason="no labels or title keywords matched; defaulted to Enhancement",
+    )
+
+
+def categorize_issue(
+    issue: dict[str, Any],
+    label_to_category: dict[str, str],
+    category_keywords: dict[str, list[str]],
+) -> str:
+    return classify_issue_category(issue, label_to_category, category_keywords).category
 
 
 def extract_issue_numbers(text: str, repo: str | None = None) -> list[str]:
@@ -197,6 +228,40 @@ query {{
         cursor = issue_connection["pageInfo"]["endCursor"]
 
     return issues
+
+
+def fetch_issue(repo: str, number: int) -> dict[str, Any]:
+    owner, name = split_repo(repo)
+    query = f"""
+query {{
+  repository(owner: \"{owner}\", name: \"{name}\") {{
+    issue(number: {number}) {{
+      number
+      title
+      body
+      state
+      createdAt
+      updatedAt
+      labels(first: 100) {{ nodes {{ name }} }}
+    }}
+  }}
+}}
+"""
+    output = run_gh(["api", "graphql", "-f", f"query={query}"])
+    data = json.loads(output)
+    issue = data.get("data", {}).get("repository", {}).get("issue")
+    if not issue:
+        raise UserError(f"could not find issue #{number} in {repo}")
+    labels = (issue.get("labels") or {}).get("nodes") or []
+    return {
+        "number": issue["number"],
+        "title": issue.get("title") or "",
+        "body": issue.get("body") or "",
+        "labels": labels,
+        "state": issue.get("state") or "",
+        "createdAt": issue.get("createdAt") or "",
+        "updatedAt": issue.get("updatedAt") or "",
+    }
 
 
 def fetch_open_prs(repo: str) -> list[dict[str, Any]]:
@@ -895,6 +960,15 @@ def build_commit_message(
     return "backlog: " + "; ".join(parts) + " [skip ci]"
 
 
+def parse_issue_number_arg(value: str) -> int:
+    text = value.strip()
+    if text.startswith("#"):
+        text = text[1:]
+    if not text.isdigit() or int(text) <= 0:
+        raise argparse.ArgumentTypeError("issue number must be a positive integer")
+    return int(text)
+
+
 def _add_update_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--repo",
@@ -924,6 +998,85 @@ def _add_update_args(parser: argparse.ArgumentParser) -> None:
         "--updates-jsonl-path",
         help="Override the path of the append-only structured updates log (updates.jsonl).",
     )
+
+
+def _add_classify_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "issue_number",
+        type=parse_issue_number_arg,
+        help="GitHub issue number to classify.",
+    )
+    parser.add_argument(
+        "--repo",
+        help=(
+            "Repository URL. GitHub URLs are supported; owner/name is accepted "
+            "as shorthand. When provided, classify uses the remote config from "
+            "the repository default branch."
+        ),
+    )
+
+
+def remote_config_source(repo: str, branch: str) -> str:
+    return f"https://github.com/{repo}@{branch}:{app_config.APP_CONFIG_RELATIVE_PATH}"
+
+
+def load_remote_config(repo: str) -> tuple[DictConfig, str]:
+    from .install import github as install_github
+
+    branch = install_github.github_default_branch(repo)
+    source = remote_config_source(repo, branch)
+    content = install_github.github_file_text(
+        repo, branch, app_config.APP_CONFIG_RELATIVE_PATH
+    )
+    if content is None:
+        raise UserError(
+            "remote Backlog Atlas config was not found:\n"
+            f"  {source}\n\n"
+            "Remote classification uses the config committed to the repository "
+            "default branch. Run `backlog-atlas install` or merge "
+            f"`{app_config.APP_CONFIG_RELATIVE_PATH}`, then rerun classify."
+        )
+    return validate_config_content(content, source), source
+
+
+def print_classification(
+    mode: str,
+    repo: str,
+    config_source: str,
+    issue: dict[str, Any],
+    classification: CategoryClassification,
+) -> None:
+    labels = parse_labels(issue)
+    print(f"Mode: {mode}")
+    print(f"Repo: {repo}")
+    print(f"Config: {config_source}")
+    print(f"Issue: #{issue['number']} {issue.get('title') or ''}")
+    print(f"Labels: {', '.join(labels) if labels else '(none)'}")
+    print(f"Category: {classification.category}")
+    print(f"Reason: {classification.reason}")
+
+
+def run_classify(args: argparse.Namespace) -> int:
+    if args.repo:
+        mode = "remote"
+        repo = resolve_repo(args.repo)
+        cfg, config_source = load_remote_config(repo)
+    else:
+        mode = "checkout"
+        target_root = detect_target_root()
+        repo = resolve_repo(None, target_root)
+        loaded_config = load_config_with_source(target_root)
+        cfg = loaded_config.config
+        config_source = loaded_config.source
+
+    cfg.repo = repo
+    issue = fetch_issue(repo, args.issue_number)
+    label_to_category, category_keywords = category_matchers(cfg)
+    classification = classify_issue_category(
+        issue, label_to_category, category_keywords
+    )
+    print_classification(mode, repo, config_source, issue, classification)
+    return 0
 
 
 def run_update(args: argparse.Namespace) -> int:
@@ -1092,6 +1245,12 @@ def main() -> int:
     )
     _add_update_args(p_update)
 
+    p_classify = sub.add_parser(
+        "classify",
+        help="Explain how one GitHub issue is classified by Backlog Atlas config.",
+    )
+    _add_classify_args(p_classify)
+
     p_install = sub.add_parser(
         "install",
         help="Write the GitHub Actions workflow for Backlog Atlas.",
@@ -1121,6 +1280,8 @@ def main() -> int:
     try:
         if args.cmd == "update":
             return run_update(args)
+        if args.cmd == "classify":
+            return run_classify(args)
         if args.cmd == "install":
             return run_install(args)
         if args.cmd == "uninstall":
