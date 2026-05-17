@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 from pathlib import Path
 
 from ..errors import UserError
 from . import artifacts, github, local, repo, sources
 from .constants import BACKLOG_BRANCH
+
+
+def install_output_context(verbose: bool):
+    if verbose:
+        return contextlib.nullcontext()
+    return contextlib.redirect_stdout(io.StringIO())
 
 
 def run_install(args: argparse.Namespace) -> int:
@@ -22,26 +30,33 @@ def run_install(args: argparse.Namespace) -> int:
     if args.delivery and not args.repo:
         raise UserError("--delivery only applies to remote installs with --repo")
 
-    install_source = sources.resolve_install_source(
-        args.install_from, dry_run=args.dry_run
-    )
+    verbose = bool(args.verbose or args.dry_run)
+    with install_output_context(verbose):
+        install_source = sources.resolve_install_source(
+            args.install_from, dry_run=args.dry_run
+        )
     if args.repo:
         repo_name = repo.resolve_repo(args.repo)
-        return github.run_remote_install(
-            repo_name, install_source, args.delivery or "pr", dry_run=args.dry_run
-        )
+        with install_output_context(verbose):
+            return github.run_remote_install(
+                repo_name,
+                install_source,
+                args.delivery or "pr",
+                dry_run=args.dry_run,
+            )
 
     target_root = (
         Path(args.target_root) if args.target_root else repo.detect_target_root()
     )
     repo_name = repo.resolve_repo(None, target_root)
-    return local.run_local_install(
-        repo_name,
-        target_root,
-        install_source,
-        dry_run=args.dry_run,
-        force=args.force,
-    )
+    with install_output_context(verbose):
+        return local.run_local_install(
+            repo_name,
+            target_root,
+            install_source,
+            dry_run=args.dry_run,
+            force=args.force,
+        )
 
 
 def run_uninstall(args: argparse.Namespace) -> int:
@@ -175,6 +190,11 @@ def add_install_args(parser: argparse.ArgumentParser) -> None:
         "--force",
         action="store_true",
         help="For local installs, proceed even when the target working tree is dirty.",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Print install progress and next-step commands.",
     )
 
 

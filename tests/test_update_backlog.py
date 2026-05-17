@@ -1286,6 +1286,7 @@ def test_install_help_prefers_repository_url(capsys: pytest.CaptureFixture[str])
     assert "Target working tree root for local install" in normalized
     assert "Cannot be combined with --repo" in normalized
     assert "proceed even when the target working tree is dirty" in normalized
+    assert "Print install progress and next-step commands" in normalized
     assert "GitHub repo owner/name" not in normalized
 
 
@@ -1575,6 +1576,7 @@ def test_install_force_reinstalls_when_already_installed(
         "--target-root",
         str(tmp_path),
         "--force",
+        "--verbose",
     ]
 
     rc = ub.main()
@@ -1928,7 +1930,7 @@ def test_install_outdated_default_branch_returns_error_without_writing(
     assert not (tmp_path / ".github").exists()
 
 
-def test_install_force_skips_dirty_worktree_check(
+def test_install_force_is_quiet_by_default_and_skips_dirty_worktree_check(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ):
     monkeypatch.setattr(install_repo, "detect_local_vcs", lambda target_root: "git")
@@ -1976,8 +1978,7 @@ def test_install_force_skips_dirty_worktree_check(
     rc = ub.main()
 
     assert rc == 0
-    out = capsys.readouterr().out
-    assert "Skipping working tree preflight checks" in out
+    assert capsys.readouterr().out == ""
     assert (tmp_path / ".github" / "workflows" / "update-backlog-atlas.yml").exists()
     assert (tmp_path / ".github" / "backlog-atlas" / "manifest.json").exists()
     assert add_calls
@@ -2498,6 +2499,7 @@ def test_install_local_target_bundles_local_source(
         str(target_root),
         "--install-from",
         str(source_root),
+        "--verbose",
     ]
     rc = ub.main()
     assert rc == 0
@@ -2554,6 +2556,7 @@ def test_install_local_checkout_guides_default_branch_push(
         "install",
         "--target-root",
         str(tmp_path),
+        "--verbose",
     ]
     rc = ub.main()
     assert rc == 0
@@ -2583,7 +2586,13 @@ def test_install_local_checkout_omits_cd_when_already_in_target(
     _stub_local_install(monkeypatch)
     monkeypatch.chdir(tmp_path)
 
-    sys.argv = ["backlog-atlas", "install", "--target-root", str(tmp_path)]
+    sys.argv = [
+        "backlog-atlas",
+        "install",
+        "--target-root",
+        str(tmp_path),
+        "--verbose",
+    ]
     rc = ub.main()
 
     assert rc == 0
@@ -2599,7 +2608,13 @@ def test_install_local_checkout_skips_pages_hint_when_pages_is_configured(
     monkeypatch.setattr(
         install_github, "github_pages_configured", lambda repo: repo == "o/r"
     )
-    sys.argv = ["backlog-atlas", "install", "--target-root", str(tmp_path)]
+    sys.argv = [
+        "backlog-atlas",
+        "install",
+        "--target-root",
+        str(tmp_path),
+        "--verbose",
+    ]
 
     rc = ub.main()
 
@@ -2669,6 +2684,7 @@ def test_install_local_checkout_guides_pr_from_non_default_branch(
         "install",
         "--target-root",
         str(tmp_path),
+        "--verbose",
     ]
     rc = ub.main()
     assert rc == 0
@@ -2712,6 +2728,7 @@ def test_install_remote_defaults_to_pr_delivery_for_github_url(
         "https://github.com/o/r.git",
         "--install-from",
         "backlog-atlas==2.0.0",
+        "--verbose",
     ]
     rc = ub.main()
     assert rc == 0
@@ -2754,6 +2771,7 @@ def test_install_remote_supports_push_delivery_for_ssh_url(
         "git@github.com:o/r.git",
         "--delivery",
         "push",
+        "--verbose",
     ]
     rc = ub.main()
     assert rc == 0
