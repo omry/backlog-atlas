@@ -791,7 +791,7 @@ def test_ensure_default_branch_current_rejects_git_checkout_missing_origin_main(
 
     err = capsys.readouterr().err
     assert f"error: {tmp_path} is missing commits from origin/main" in err
-    assert "pull and rebase before installing" in err
+    assert "update the checkout before installing" in err
     assert (
         "latest missing commit: abc123 backlog: remove temporary cleanup workflow"
         in err
@@ -2563,14 +2563,17 @@ def test_install_local_checkout_guides_default_branch_push(
     assert "Checked install workflow and manifest" in out
     assert "created install commit" in out
     assert f"cd {tmp_path}" in out
-    assert "# Optional: inspect the install commit with git show --stat HEAD." in out
+    assert "# Optional: inspect the install commit" not in out
     assert "# Review the install commit." not in out
     assert "# Push when ready." not in out
     assert "git push" in out
     assert "git push -u origin HEAD" not in out
+    assert "# After the install commit is on the default branch" not in out
     assert "gh workflow run 'Update Backlog Atlas' --repo o/r" in out
+    assert "gh run list --repo o/r --workflow=update-backlog-atlas.yml" in out
+    assert "gh run list --workflow=update-backlog-atlas.yml" not in out
     assert "https://github.com/o/r/settings/pages" in out
-    assert "\ngit push\n\n# Trigger the first Backlog Atlas run.\n" in out
+    assert "\ngit push\n\n# Trigger and watch the first Backlog Atlas run.\n" in out
     assert "\n\n# Enable Pages from the backlog-atlas branch, folder /.\n" in out
 
 
@@ -2586,7 +2589,7 @@ def test_install_local_checkout_omits_cd_when_already_in_target(
     assert rc == 0
     out = capsys.readouterr().out
     assert f"cd {tmp_path}" not in out
-    assert "# Optional: inspect the install commit with git show --stat HEAD." in out
+    assert "gh run list --repo o/r --workflow=update-backlog-atlas.yml" in out
 
 
 def test_install_local_checkout_skips_pages_hint_when_pages_is_configured(
@@ -2603,6 +2606,7 @@ def test_install_local_checkout_skips_pages_hint_when_pages_is_configured(
     assert rc == 0
     out = capsys.readouterr().out
     assert "gh workflow run 'Update Backlog Atlas' --repo o/r" in out
+    assert "gh run list --repo o/r --workflow=update-backlog-atlas.yml" in out
     assert "# Enable Pages from the backlog-atlas branch, folder /." not in out
     assert "https://github.com/o/r/settings/pages" not in out
 
@@ -2626,9 +2630,31 @@ def test_install_local_next_steps_are_colorized_when_forced(
     out = capsys.readouterr().out
     assert "\033[" in out
     plain = install_commands.strip_ansi(out)
-    assert "# Optional: inspect the install commit with git show --stat HEAD." in plain
-    assert "git show --stat HEAD" in plain
+    assert "# Optional: inspect the install commit" not in plain
+    assert "git show --stat HEAD" not in plain
+    assert "gh run list --repo o/r --workflow=update-backlog-atlas.yml" in plain
     assert "# Push when ready." not in plain
+
+
+def test_install_local_next_steps_show_repo_qualified_run_list_for_sapling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    monkeypatch.setattr(
+        install_repo, "is_on_default_branch", lambda target_root, vcs: None
+    )
+    monkeypatch.setattr(install_github, "github_pages_configured", lambda repo: True)
+
+    install_local.print_local_install_next_steps("o/r", tmp_path, "sl")
+
+    out = capsys.readouterr().out
+    assert "sl push" in out
+    assert (
+        "# After the install commit is on the default branch, "
+        "trigger and watch the first run."
+    ) in out
+    assert "gh workflow run 'Update Backlog Atlas' --repo o/r" in out
+    assert "gh run list --repo o/r --workflow=update-backlog-atlas.yml" in out
+    assert "gh run list --workflow=update-backlog-atlas.yml" not in out
 
 
 def test_install_local_checkout_guides_pr_from_non_default_branch(
@@ -2648,10 +2674,15 @@ def test_install_local_checkout_guides_pr_from_non_default_branch(
     assert rc == 0
     out = capsys.readouterr().out
     assert "created install commit" in out
-    assert "# Optional: inspect the install commit with git show --stat HEAD." in out
+    assert "# Optional: inspect the install commit" not in out
     assert "git push -u origin HEAD" in out
-    assert "# Open or merge a PR for this install commit before continuing." in out
+    assert (
+        "# After the install commit is on the default branch, "
+        "trigger and watch the first run."
+    ) in out
+    assert "# Open or merge a PR for this install commit before continuing." not in out
     assert "gh workflow run 'Update Backlog Atlas' --repo o/r" in out
+    assert "gh run list --repo o/r --workflow=update-backlog-atlas.yml" in out
 
 
 def test_install_remote_defaults_to_pr_delivery_for_github_url(

@@ -7,7 +7,7 @@ from pathlib import Path
 from .. import config as app_config
 from . import artifacts, github, repo
 from .commands import run_command, try_command
-from .constants import BACKLOG_BRANCH
+from .constants import BACKLOG_BRANCH, WORKFLOW_RELATIVE_PATH
 from .models import InstallSource, describe_install_source, install_commit_message
 
 ANSI_RESET = "\033[0m"
@@ -164,6 +164,11 @@ def local_push_command(vcs: str, on_default: bool | None) -> str:
     raise RuntimeError(f"unsupported VCS: {vcs}")
 
 
+def workflow_run_list_command(repo_name: str) -> str:
+    workflow_file = Path(WORKFLOW_RELATIVE_PATH).name
+    return f"gh run list --repo {repo_name} --workflow={workflow_file}"
+
+
 def print_local_install_next_steps(repo_name: str, target_root: Path, vcs: str) -> None:
     color = color_enabled()
     print()
@@ -172,34 +177,16 @@ def print_local_install_next_steps(repo_name: str, target_root: Path, vcs: str) 
     if Path.cwd().resolve() != target_root.resolve():
         print(style(f"cd {target_root}", ANSI_COMMAND, color))
         print()
-    print(
-        style(
-            f"# Optional: inspect the install commit with {local_review_command(vcs)}.",
-            ANSI_DIM,
-            color,
-        )
-    )
     print(style(local_push_command(vcs, on_default), ANSI_COMMAND, color))
     print()
-    if on_default is False:
-        print(
-            style(
-                "# Open or merge a PR for this install commit before continuing.",
-                ANSI_DIM,
-                color,
-            )
+    if on_default is not True:
+        next_step = (
+            "# After the install commit is on the default branch, "
+            "trigger and watch the first run."
         )
-        print()
-    elif on_default is None:
-        print(
-            style(
-                "# If this is not the default branch, merge the install commit first.",
-                ANSI_DIM,
-                color,
-            )
-        )
-        print()
-    print(style("# Trigger the first Backlog Atlas run.", ANSI_DIM, color))
+    else:
+        next_step = "# Trigger and watch the first Backlog Atlas run."
+    print(style(next_step, ANSI_DIM, color))
     print(
         style(
             f"gh workflow run 'Update Backlog Atlas' --repo {repo_name}",
@@ -207,6 +194,7 @@ def print_local_install_next_steps(repo_name: str, target_root: Path, vcs: str) 
             color,
         )
     )
+    print(style(workflow_run_list_command(repo_name), ANSI_COMMAND, color))
     if not github.github_pages_configured(repo_name):
         print()
         print(
