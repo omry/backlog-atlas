@@ -8,7 +8,6 @@ from typing import Any
 from ..errors import UserError
 from .artifacts import (
     bundled_package_paths_to_cleanup,
-    build_install_metadata,
     build_install_manifest,
     manifest_bundled_package_paths,
     load_upgrade_cleanup_workflow_template,
@@ -344,7 +343,6 @@ def install_remote_workflow(
         old_bundled_package_paths,
     )
     workflow_content = load_workflow_template(install_source.pip_spec)
-    metadata_content = build_install_metadata(install_source)
     include_upgrade_cleanup = bool(cleanup_package_paths)
     manifest_content = build_install_manifest(
         install_source,
@@ -367,17 +365,13 @@ def install_remote_workflow(
             workflow_content,
             commit_message,
         )
-        print(
-            f"Writing install metadata to {default_branch}: "
-            f"{INSTALL_METADATA_RELATIVE_PATH}"
-        )
-        put_github_file(
+        if delete_github_file(
             repo,
             default_branch,
             INSTALL_METADATA_RELATIVE_PATH,
-            metadata_content,
-            commit_message,
-        )
+            "backlog: remove legacy Backlog Atlas install metadata",
+        ):
+            print(f"Removed legacy install metadata from {default_branch}")
         print(
             f"Writing install manifest to {default_branch}: "
             f"{INSTALL_MANIFEST_RELATIVE_PATH}"
@@ -410,17 +404,13 @@ def install_remote_workflow(
         workflow_content,
         commit_message,
     )
-    print(
-        f"Writing install metadata to {INSTALL_BRANCH}: "
-        f"{INSTALL_METADATA_RELATIVE_PATH}"
-    )
-    put_github_file(
+    if delete_github_file(
         repo,
         INSTALL_BRANCH,
         INSTALL_METADATA_RELATIVE_PATH,
-        metadata_content,
-        commit_message,
-    )
+        "backlog: remove legacy Backlog Atlas install metadata",
+    ):
+        print(f"Removed legacy install metadata from {INSTALL_BRANCH}")
     print(
         f"Writing install manifest to {INSTALL_BRANCH}: "
         f"{INSTALL_MANIFEST_RELATIVE_PATH}"
@@ -477,7 +467,6 @@ def print_remote_install_plan(
             "then open an install pull request with:"
         )
     print(f"  - {WORKFLOW_RELATIVE_PATH}")
-    print(f"  - {INSTALL_METADATA_RELATIVE_PATH}")
     print(f"  - {INSTALL_MANIFEST_RELATIVE_PATH}")
     if cleanup_old_bundled_packages:
         print(f"  - {UPGRADE_CLEANUP_WORKFLOW_RELATIVE_PATH}")

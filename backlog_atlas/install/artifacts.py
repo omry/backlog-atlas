@@ -12,7 +12,6 @@ from .constants import (
     INSTALL_MANIFEST_RELATIVE_PATH,
     INSTALL_MANIFEST_SCHEMA_VERSION,
     INSTALL_METADATA_RELATIVE_PATH,
-    INSTALL_METADATA_SCHEMA_VERSION,
     UNINSTALL_WORKFLOW_TEMPLATE_PATH,
     UPGRADE_CLEANUP_WORKFLOW_RELATIVE_PATH,
     UPGRADE_CLEANUP_WORKFLOW_TEMPLATE_PATH,
@@ -25,7 +24,6 @@ from .models import InstallSource
 @dataclass
 class InstallArtifactResult:
     workflow_path: Path
-    metadata_path: Path
     manifest_path: Path
     upgrade_cleanup_path: Path
     changed_paths: list[Path]
@@ -91,26 +89,31 @@ def find_upgrade_cleanup_workflow_target(target_repo_root: Path) -> Path:
     return target_repo_root / UPGRADE_CLEANUP_WORKFLOW_RELATIVE_PATH
 
 
-def find_install_metadata_target(target_repo_root: Path) -> Path:
-    return target_repo_root / INSTALL_METADATA_RELATIVE_PATH
-
-
 def find_install_manifest_target(target_repo_root: Path) -> Path:
     return target_repo_root / INSTALL_MANIFEST_RELATIVE_PATH
 
 
-def build_install_metadata(install_source: InstallSource) -> str:
-    metadata = {
-        "schema_version": INSTALL_METADATA_SCHEMA_VERSION,
-        "tool": "backlog-atlas",
+def build_install_manifest(
+    install_source: InstallSource, include_upgrade_cleanup: bool
+) -> str:
+    install = {
         "installed_version": install_source.version,
         "install_source": install_source.pip_spec,
         "source_type": install_source.source_type,
         "workflow_path": WORKFLOW_RELATIVE_PATH,
     }
     if install_source.bundled_wheel_path:
-        metadata["bundled_wheel_path"] = install_source.bundled_wheel_path
-    return json.dumps(metadata, indent=2, sort_keys=True) + "\n"
+        install["bundled_wheel_path"] = install_source.bundled_wheel_path
+    manifest = {
+        "schema_version": INSTALL_MANIFEST_SCHEMA_VERSION,
+        "tool": "backlog-atlas",
+        "install": install,
+        "files": install_manifest_entries(
+            install_source,
+            include_upgrade_cleanup=include_upgrade_cleanup,
+        ),
+    }
+    return json.dumps(manifest, indent=2, sort_keys=True) + "\n"
 
 
 def install_manifest_entries(
@@ -119,11 +122,6 @@ def install_manifest_entries(
     entries: list[dict[str, object]] = [
         {
             "path": WORKFLOW_RELATIVE_PATH,
-            "branch": "default",
-            "remove": "uninstall",
-        },
-        {
-            "path": INSTALL_METADATA_RELATIVE_PATH,
             "branch": "default",
             "remove": "uninstall",
         },
@@ -157,20 +155,6 @@ def install_manifest_entries(
             }
         )
     return entries
-
-
-def build_install_manifest(
-    install_source: InstallSource, include_upgrade_cleanup: bool
-) -> str:
-    manifest = {
-        "schema_version": INSTALL_MANIFEST_SCHEMA_VERSION,
-        "tool": "backlog-atlas",
-        "files": install_manifest_entries(
-            install_source,
-            include_upgrade_cleanup=include_upgrade_cleanup,
-        ),
-    }
-    return json.dumps(manifest, indent=2, sort_keys=True) + "\n"
 
 
 def parse_install_manifest(content: str) -> dict[str, object] | None:
@@ -375,6 +359,16 @@ def remove_upgrade_cleanup_artifact(target_root: Path) -> Path | None:
     return path
 
 
+def remove_legacy_install_metadata(target_root: Path) -> Path | None:
+    path = target_root / INSTALL_METADATA_RELATIVE_PATH
+    if not path.exists() or path.is_dir():
+        return None
+    if not is_removable_install_artifact(path, INSTALL_METADATA_RELATIVE_PATH):
+        return None
+    path.unlink()
+    return path
+
+
 def has_install_artifacts(target_root: Path) -> bool:
     for rel_path in uninstall_relative_paths_from_manifest(target_root, clean=False):
         rel_path = safe_manifest_relative_path(rel_path) or ""
@@ -420,7 +414,6 @@ def write_install_artifacts(
         old_bundled_package_paths,
     )
     wf_path = find_workflow_target(target_root)
-    metadata_path = find_install_metadata_target(target_root)
     manifest_path = find_install_manifest_target(target_root)
     upgrade_cleanup_path = find_upgrade_cleanup_workflow_target(target_root)
     changed_paths = []
@@ -439,10 +432,6 @@ def write_install_artifacts(
         if write_text_artifact(wf_path, workflow_content, force=force):
             changed_paths.append(wf_path)
 
-    if workflow_matches and write_text_artifact(
-        metadata_path, build_install_metadata(install_source), force=force
-    ):
-        changed_paths.append(metadata_path)
     if workflow_matches and write_text_artifact(
         manifest_path,
         build_install_manifest(
@@ -466,7 +455,6 @@ def write_install_artifacts(
             changed_paths.append(upgrade_cleanup_path)
     return InstallArtifactResult(
         workflow_path=wf_path,
-        metadata_path=metadata_path,
         manifest_path=manifest_path,
         upgrade_cleanup_path=upgrade_cleanup_path,
         changed_paths=changed_paths,

@@ -5,8 +5,7 @@ Backlog Atlas on a GitHub repository.
 
 Backlog Atlas creates a dedicated `backlog-atlas` branch containing a static
 dashboard and machine-readable backlog state. Your default branch only gets the
-workflow that keeps that branch updated, install metadata, and an install
-manifest used for cleanup.
+workflow that keeps that branch updated and an install manifest used for cleanup.
 
 ## Requirements
 
@@ -57,11 +56,9 @@ This writes:
 
 - `.github/workflows/update-backlog-atlas.yml` — the GitHub Actions workflow
   that updates the `backlog-atlas` branch when issues or pull requests change.
-- `.github/backlog-atlas.json` — install metadata recording the Backlog
-  Atlas version, install source, source type, and managed workflow path.
 - `.github/backlog-atlas/manifest.json` — the cleanup manifest listing
-  installed files and whether normal uninstall or only clean uninstall removes
-  them.
+  installed files, install source, Backlog Atlas version, and whether normal
+  uninstall or only clean uninstall removes each file.
 
 Local install requires a clean Git or Sapling working tree. It stages/adds the
 managed install files, creates a local commit containing only those files, and
@@ -182,7 +179,7 @@ Atlas install hooks and manifests from the default branch.
 
 Uninstall follows Debian-style remove/purge semantics:
 
-- Normal uninstall removes the installed workflow, install metadata/manifest, and
+- Normal uninstall removes the installed workflow, install manifest, and
   bundled install packages from `.backlog-atlas/packages/`.
 - Normal uninstall preserves the `backlog-atlas` branch, generated dashboard
   history, and Backlog Atlas config.
@@ -258,9 +255,9 @@ backlog-atlas install --repo https://github.com/owner/name --dry-run
 backlog-atlas install --repo https://github.com/owner/name
 ```
 
-This updates the installed workflow, `.github/backlog-atlas.json`, and
-`.github/backlog-atlas/manifest.json` so future workflow runs use the upgraded
-Backlog Atlas source and cleanup uses the current install manifest. If the
+This updates the installed workflow and `.github/backlog-atlas/manifest.json` so
+future workflow runs use the upgraded Backlog Atlas source and cleanup uses the
+current install manifest. If the
 generated `backlog-atlas` branch already exists, the next workflow run updates
 its machine-generated files in place.
 

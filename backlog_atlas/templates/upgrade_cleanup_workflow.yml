@@ -5,7 +5,6 @@ on:
     paths:
       - .github/workflows/update-backlog-atlas.yml
       - .github/workflows/temporary-backlog-atlas-upgrade-cleanup.yml
-      - .github/backlog-atlas.json
       - .github/backlog-atlas/manifest.json
   workflow_dispatch:
 

@@ -215,7 +215,6 @@ def print_local_install_plan(
         )
     print("Would write or update:")
     print(f"  - {artifacts.find_workflow_target(target_root)}")
-    print(f"  - {artifacts.find_install_metadata_target(target_root)}")
     print(f"  - {artifacts.find_install_manifest_target(target_root)}")
     if cleanup_old_bundled_packages:
         print(f"  - {artifacts.find_upgrade_cleanup_workflow_target(target_root)}")
@@ -271,6 +270,9 @@ def run_local_install(
         removed_paths = []
     else:
         removed_paths = artifacts.remove_install_artifacts(target_root)
+        legacy_metadata_path = artifacts.remove_legacy_install_metadata(target_root)
+        if legacy_metadata_path is not None:
+            removed_paths.append(legacy_metadata_path)
     if removed_paths:
         print("Removed previous Backlog Atlas install hook/manifest files")
 
@@ -280,15 +282,13 @@ def run_local_install(
         force=force,
         old_bundled_package_paths=old_bundled_package_paths,
     )
-    print("Checked install workflow and metadata")
+    print("Checked install workflow and manifest")
     changed_paths = unique_paths([*result.changed_paths, *removed_paths])
     if changed_paths:
         if result.workflow_path in result.changed_paths:
             print(f"wrote workflow to {result.workflow_path}")
         else:
             print(f"workflow already exists at {result.workflow_path}")
-        if result.metadata_path in result.changed_paths:
-            print(f"wrote install metadata to {result.metadata_path}")
         if result.manifest_path in result.changed_paths:
             print(f"wrote install manifest to {result.manifest_path}")
         if result.upgrade_cleanup_path in result.changed_paths:
@@ -315,11 +315,11 @@ def run_local_install(
     else:
         print(f"workflow already exists at {result.workflow_path}")
         if result.workflow_matches:
-            print(f"install metadata already exists at {result.metadata_path}")
+            print(f"install manifest already exists at {result.manifest_path}")
             print("\nNothing to do - Backlog Atlas is already installed in this repo.")
         else:
             print(
-                "left install metadata unchanged because the existing workflow "
+                "left install manifest unchanged because the existing workflow "
                 "differs from the generated workflow"
             )
             print("\nNothing changed.")
