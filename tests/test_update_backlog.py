@@ -819,6 +819,10 @@ def test_web_ui_supports_browser_federated_manifest():
     ).read_text(encoding="utf-8")
 
     assert 'fetch("atlas.json")' in content
+    assert "manifestResponse.status === 404" in content
+    assert "Could not load Backlog Atlas data" in content
+    assert "atlas.json must include at least one repo entry" in content
+    assert "Falling back to backlog.json after atlas.json load failed" not in content
     assert "backlog_url" in content
     assert 'id="repo-pills"' in content
     assert 'data-key="repo"' in content

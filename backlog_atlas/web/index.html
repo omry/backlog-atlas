@@ -285,6 +285,16 @@
   }
   button.theme-toggle:hover { border-color: var(--accent); }
   .header-actions { display: flex; gap: 0.4rem; align-items: center; }
+  .error-banner {
+    margin: 0.75rem 1.5rem 0;
+    border: 1px solid #f85149;
+    background: rgba(248, 81, 73, 0.12);
+    color: var(--fg);
+    border-radius: 6px;
+    padding: 0.6rem 0.75rem;
+    font-size: 0.9rem;
+  }
+  .error-banner[hidden] { display: none; }
 </style>
 <script>
   // Set theme before render to avoid flash.
@@ -311,6 +321,8 @@
     <button class="theme-toggle" id="theme-toggle" title="Toggle theme"></button>
   </div>
 </header>
+
+<div class="error-banner" id="load-error" hidden></div>
 
 <div class="layout">
   <aside class="stats-aside">
@@ -727,25 +739,36 @@ function combineDatasets(datasets, manifest = null) {
   };
 }
 
-async function loadBacklogData() {
-  try {
-    const manifestResponse = await fetch("atlas.json");
-    if (manifestResponse.ok) {
-      const manifest = await manifestResponse.json();
-      if (Array.isArray(manifest.repos) && manifest.repos.length) {
-        const datasets = await Promise.all(manifest.repos.map(async entry => {
-          const url = entry.backlog_url || entry.url;
-          if (!url) throw new Error("atlas.json repo entries must include backlog_url");
-          return normalizeDataset(await fetchJson(url), url, entry.repo || "");
-        }));
-        return combineDatasets(datasets, manifest);
-      }
-    }
-  } catch (error) {
-    console.warn("Falling back to backlog.json after atlas.json load failed", error);
-  }
+async function loadSingleRepoData() {
   const data = await fetchJson("backlog.json");
   return combineDatasets([normalizeDataset(data, "backlog.json")]);
+}
+
+async function loadBacklogData() {
+  const manifestResponse = await fetch("atlas.json");
+  if (manifestResponse.status === 404) {
+    return await loadSingleRepoData();
+  }
+  if (!manifestResponse.ok) {
+    throw new Error(`Could not load atlas.json: HTTP ${manifestResponse.status}`);
+  }
+  const manifest = await manifestResponse.json();
+  if (!Array.isArray(manifest.repos) || !manifest.repos.length) {
+    throw new Error("atlas.json must include at least one repo entry");
+  }
+  const datasets = await Promise.all(manifest.repos.map(async entry => {
+    const url = entry.backlog_url || entry.url;
+    if (!url) throw new Error("atlas.json repo entries must include backlog_url");
+    return normalizeDataset(await fetchJson(url), url, entry.repo || "");
+  }));
+  return combineDatasets(datasets, manifest);
+}
+
+function showLoadError(error) {
+  const el = document.getElementById("load-error");
+  const message = error && error.message ? error.message : String(error);
+  el.textContent = `Could not load Backlog Atlas data: ${message}`;
+  el.hidden = false;
 }
 
 async function init() {
@@ -756,7 +779,12 @@ async function init() {
   setupResize("left-resize", "--left-w", "x", 1, 160, 480);
   setupResize("right-resize", "--right-w", "x", -1, 140, 400);
   setupResize("activity-resize", "--activity-h", "y", -1, 60, 600);
-  state.data = await loadBacklogData();
+  try {
+    state.data = await loadBacklogData();
+  } catch (error) {
+    showLoadError(error);
+    return;
+  }
   state.categories = state.data.categories || categoryListFromDatasets([state.data]);
   state.repoOptions = [...new Set((state.data.repos || []).map(r => r.repo).filter(Boolean))];
   const repo = state.data.repo || "";

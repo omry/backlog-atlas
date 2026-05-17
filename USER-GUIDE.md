@@ -216,7 +216,9 @@ datasets locally:
 ```
 
 If `atlas.json` is not present, the UI falls back to the single-repo
-`backlog.json` behavior. Browser federation is intended for public or otherwise
+`backlog.json` behavior. If `atlas.json` exists but is invalid, or one of its
+listed datasets cannot be loaded, the page shows a load error instead of
+silently switching modes. Browser federation is intended for public or otherwise
 browser-readable datasets; it does not add credentials or server-side
 aggregation.
 
