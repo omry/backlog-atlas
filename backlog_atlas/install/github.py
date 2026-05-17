@@ -115,6 +115,20 @@ def github_file_text(repo: str, branch: str, path: str) -> str | None:
         return None
 
 
+def github_pages_configured(repo: str) -> bool:
+    output = try_gh(["api", f"repos/{repo}/pages"])
+    if not output:
+        return False
+    try:
+        data = json.loads(output)
+    except json.JSONDecodeError:
+        return False
+    source = data.get("source")
+    if not isinstance(source, dict):
+        return False
+    return source.get("branch") == BACKLOG_BRANCH and source.get("path") == "/"
+
+
 def remote_installed_bundled_package_paths(repo: str, branch: str) -> list[str]:
     manifest = github_file_text(repo, branch, INSTALL_MANIFEST_RELATIVE_PATH)
     if manifest is None:

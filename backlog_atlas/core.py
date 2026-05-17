@@ -23,7 +23,7 @@ from .install.cli import (
     run_uninstall,
 )
 from .install.commands import read_text, run_gh
-from .install.constants import ATLAS_CONFIG_RELATIVE_PATH
+from .install.constants import ATLAS_CONFIG_RELATIVE_PATH, BACKLOG_BRANCH
 from .install.repo import detect_target_root, normalize_github_repo, resolve_repo
 
 PROJECT_DIR = Path(__file__).resolve().parent
@@ -1059,7 +1059,7 @@ def _add_atlas_args(parser: argparse.ArgumentParser) -> None:
         "--backlog-url",
         help=(
             "Published backlog.json URL. Defaults to "
-            "https://OWNER.github.io/REPO/backlog.json."
+            "https://raw.githubusercontent.com/OWNER/REPO/backlog-atlas/backlog.json."
         ),
     )
     _add_atlas_config_arg(p_add)
@@ -1356,9 +1356,26 @@ def atlas_repo_entries(config: DictConfig, path: Path) -> list[dict[str, str]]:
     return entries
 
 
-def default_atlas_backlog_url(repo: str) -> str:
+def raw_github_backlog_url(repo: str) -> str:
+    return f"https://raw.githubusercontent.com/{repo}/{BACKLOG_BRANCH}/backlog.json"
+
+
+def github_pages_backlog_url(repo: str) -> str:
     owner, name = repo.split("/", 1)
     return f"https://{owner}.github.io/{name}/backlog.json"
+
+
+def default_atlas_backlog_url(repo: str) -> str:
+    return raw_github_backlog_url(repo)
+
+
+def browser_atlas_backlog_url(repo: str, backlog_url: str) -> str:
+    normalized_repo = normalize_github_repo(repo)
+    if normalized_repo and backlog_url.rstrip("/") == github_pages_backlog_url(
+        normalized_repo
+    ):
+        return raw_github_backlog_url(normalized_repo)
+    return backlog_url
 
 
 def save_atlas_config(path: Path, config: DictConfig) -> None:
@@ -1501,7 +1518,9 @@ def load_atlas_manifest_config(path: Path) -> dict[str, Any]:
                 path,
                 f"`repos[{index}].backlog_url` must be a non-empty string",
             )
-        manifest["repos"].append({"repo": repo, "backlog_url": backlog_url})
+        manifest["repos"].append(
+            {"repo": repo, "backlog_url": browser_atlas_backlog_url(repo, backlog_url)}
+        )
 
     return manifest
 

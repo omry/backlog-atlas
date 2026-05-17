@@ -757,6 +757,7 @@ def _stub_local_install(monkeypatch: pytest.MonkeyPatch) -> list[tuple[Any, ...]
     monkeypatch.setattr(install_local, "ensure_worktree_clean", fake_clean)
     monkeypatch.setattr(install_local, "add_local_install_files", fake_add)
     monkeypatch.setattr(install_local, "commit_local_files", fake_commit)
+    monkeypatch.setattr(install_github, "github_pages_configured", lambda repo: False)
     monkeypatch.setattr(
         install_repo, "is_on_default_branch", lambda target_root, vcs: None
     )
@@ -882,6 +883,39 @@ def test_dump_atlas_resolves_yaml_config(
     )
 
 
+def test_dump_atlas_rewrites_github_pages_backlog_urls_for_browser(tmp_path: Path):
+    config = tmp_path / "atlas.yaml"
+    config.write_text(
+        "\n".join(
+            [
+                "repos:",
+                "  - repo: omry/omegaconf",
+                "    backlog_url: https://omry.github.io/omegaconf/backlog.json",
+                "  - repo: facebookresearch/hydra",
+                "    backlog_url: https://example.com/hydra/backlog.json",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert ub.load_atlas_manifest_config(config) == {
+        "repos": [
+            {
+                "repo": "omry/omegaconf",
+                "backlog_url": (
+                    "https://raw.githubusercontent.com/"
+                    "omry/omegaconf/backlog-atlas/backlog.json"
+                ),
+            },
+            {
+                "repo": "facebookresearch/hydra",
+                "backlog_url": "https://example.com/hydra/backlog.json",
+            },
+        ]
+    }
+
+
 def test_dump_atlas_rejects_invalid_yaml_config(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ):
@@ -937,7 +971,10 @@ def test_atlas_cli_add_list_and_remove_repos(
         "repos": [
             {
                 "repo": "omry/omegaconf",
-                "backlog_url": "https://omry.github.io/omegaconf/backlog.json",
+                "backlog_url": (
+                    "https://raw.githubusercontent.com/"
+                    "omry/omegaconf/backlog-atlas/backlog.json"
+                ),
             },
             {
                 "repo": "facebookresearch/hydra",
@@ -1128,6 +1165,38 @@ def test_verify_backlog_atlas_installed_rejects_missing_install_manifest(
     message = str(exc.value)
     assert "does not appear to have Backlog Atlas installed" in message
     assert "https://github.com/o/r@main:.github/backlog-atlas/manifest.json" in message
+
+
+def test_github_pages_configured_detects_backlog_branch_pages(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(
+        install_github,
+        "try_gh",
+        lambda args: json.dumps({"source": {"branch": "backlog-atlas", "path": "/"}}),
+    )
+
+    assert install_github.github_pages_configured("o/r") is True
+
+
+def test_github_pages_configured_rejects_other_pages_source(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(
+        install_github,
+        "try_gh",
+        lambda args: json.dumps({"source": {"branch": "main", "path": "/"}}),
+    )
+
+    assert install_github.github_pages_configured("o/r") is False
+
+
+def test_github_pages_configured_treats_missing_pages_as_unconfigured(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(install_github, "try_gh", lambda args: None)
+
+    assert install_github.github_pages_configured("o/r") is False
 
 
 def test_install_help_prefers_repository_url(capsys: pytest.CaptureFixture[str]):
@@ -2402,6 +2471,24 @@ def test_install_local_checkout_omits_cd_when_already_in_target(
     assert "# Review the install commit." in out
 
 
+def test_install_local_checkout_skips_pages_hint_when_pages_is_configured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    _stub_local_install(monkeypatch)
+    monkeypatch.setattr(
+        install_github, "github_pages_configured", lambda repo: repo == "o/r"
+    )
+    sys.argv = ["backlog-atlas", "install", "--target-root", str(tmp_path)]
+
+    rc = ub.main()
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "gh workflow run 'Update Backlog Atlas' --repo o/r" in out
+    assert "# Enable Pages from the backlog-atlas branch, folder /." not in out
+    assert "https://github.com/o/r/settings/pages" not in out
+
+
 def test_install_local_next_steps_are_colorized_when_forced(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ):
@@ -2410,6 +2497,7 @@ def test_install_local_next_steps_are_colorized_when_forced(
     monkeypatch.setattr(
         install_repo, "is_on_default_branch", lambda target_root, vcs: True
     )
+    monkeypatch.setattr(install_github, "github_pages_configured", lambda repo: False)
 
     install_local.print_local_install_next_steps(
         "o/r",

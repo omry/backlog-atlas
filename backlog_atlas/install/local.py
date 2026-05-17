@@ -141,13 +141,18 @@ def print_local_install_next_steps(repo_name: str, target_root: Path, vcs: str) 
             color,
         )
     )
-    print()
-    print(
-        style(
-            "# Enable Pages from the backlog-atlas branch, folder /.", ANSI_DIM, color
+    if not github.github_pages_configured(repo_name):
+        print()
+        print(
+            style(
+                "# Enable Pages from the backlog-atlas branch, folder /.",
+                ANSI_DIM,
+                color,
+            )
         )
-    )
-    print(style(f"# https://github.com/{repo_name}/settings/pages", ANSI_URL, color))
+        print(
+            style(f"# https://github.com/{repo_name}/settings/pages", ANSI_URL, color)
+        )
 
 
 def print_local_uninstall_next_steps(target_root: Path, vcs: str) -> None:

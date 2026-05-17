@@ -204,16 +204,16 @@ Use the CLI for simple published URLs:
 
 ```sh
 backlog-atlas atlas add omry/omegaconf
-backlog-atlas atlas add facebookresearch/hydra \
-  --backlog-url https://facebookresearch.github.io/hydra/backlog.json
+backlog-atlas atlas add facebookresearch/hydra
 backlog-atlas atlas list
 backlog-atlas atlas remove facebookresearch/hydra
 ```
 
 Without `--backlog-url`, `atlas add` defaults to
-`https://OWNER.github.io/REPO/backlog.json`. `atlas add` validates that GitHub
-can see the repository and that Backlog Atlas is installed there before updating
-`atlas.yaml`.
+`https://raw.githubusercontent.com/OWNER/REPO/backlog-atlas/backlog.json`, which
+is readable by browsers from other GitHub Pages sites. `atlas add` validates
+that GitHub can see the repository and that Backlog Atlas is installed there
+before updating `atlas.yaml`.
 
 Edit the YAML directly when you want OmegaConf interpolation or separate local
 and published URLs:
@@ -221,11 +221,12 @@ and published URLs:
 ```yaml
 title: OmegaConf + Hydra Backlog
 target: ${oc.env:BACKLOG_ATLAS_TARGET,published}
+raw_base: https://raw.githubusercontent.com
 
 urls:
   published:
-    omegaconf: https://omry.github.io/omegaconf/backlog.json
-    hydra: https://facebookresearch.github.io/hydra/backlog.json
+    omegaconf: ${raw_base}/omry/omegaconf/backlog-atlas/backlog.json
+    hydra: ${raw_base}/facebookresearch/hydra/backlog-atlas/backlog.json
   local:
     omegaconf: ./omegaconf/backlog.json
     hydra: ./hydra/backlog.json
@@ -247,7 +248,10 @@ BACKLOG_ATLAS_TARGET=local backlog-atlas dump-atlas \
 The YAML is read with OmegaConf, so interpolations such as
 `${urls.${target}.omegaconf}` are resolved before writing the materialized
 browser JSON. `BACKLOG_ATLAS_TARGET=local` lets you test local files before
-publishing; leaving it unset emits the published URLs.
+publishing; leaving it unset emits the published URLs. Conventional GitHub Pages
+URLs such as `https://OWNER.github.io/REPO/backlog.json` are rewritten to the
+matching `raw.githubusercontent.com` URL while compiling `atlas.json`, because
+GitHub Pages does not reliably allow cross-origin browser reads of JSON data.
 
 After `atlas.yaml` is committed, the installed workflow publishes `atlas.json`
 on the next run. If `atlas.yaml` is removed, the workflow removes stale
