@@ -1,9 +1,9 @@
 {
-  "generated_on": "2026-05-16",
-  "generated_at": "2026-05-16T20:38:08Z",
+  "generated_on": "2026-05-17",
+  "generated_at": "2026-05-17T07:13:30Z",
   "repo": "omry/backlog-atlas",
   "summary": {
-    "open_total": 1,
+    "open_total": 2,
     "by_category": [
       {
         "category": "Bug",
@@ -14,7 +14,7 @@
       {
         "category": "Enhancement",
         "emoji": "✨",
-        "count": 1,
+        "count": 2,
         "percentage": 100.0
       },
       {
@@ -61,7 +61,7 @@
       {
         "status": "not started",
         "emoji": "⬜",
-        "count": 1
+        "count": 2
       },
       {
         "status": "done",
@@ -85,7 +85,30 @@
         "enhancement"
       ],
       "url": "https://github.com/omry/backlog-atlas/issues/1"
+    },
+    {
+      "number": 2,
+      "title": "Explore reusable GitHub Actions package-manager lifecycle",
+      "category": "Enhancement",
+      "category_emoji": "✨",
+      "status": "not started",
+      "status_emoji": "⬜",
+      "prs": [],
+      "created": "2026-05-17",
+      "updated": "2026-05-17",
+      "labels": [
+        "help wanted"
+      ],
+      "url": "https://github.com/omry/backlog-atlas/issues/2"
     }
   ],
-  "updates": []
+  "updates": [
+    {
+      "ts": "2026-05-17T07:13:30Z",
+      "kind": "new",
+      "issue": 2,
+      "issue_url": "https://github.com/omry/backlog-atlas/issues/2",
+      "title": "Explore reusable GitHub Actions package-manager lifecycle"
+    }
+  ]
 }
