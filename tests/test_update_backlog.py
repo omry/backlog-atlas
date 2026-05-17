@@ -904,8 +904,11 @@ def test_dump_atlas_rejects_invalid_yaml_config(
 
 
 def test_atlas_cli_add_list_and_remove_repos(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ):
+    monkeypatch.setattr(
+        install_github, "verify_backlog_atlas_installed", lambda repo: "main"
+    )
     config = tmp_path / "atlas.yaml"
 
     sys.argv = [
@@ -986,8 +989,15 @@ def test_atlas_cli_add_list_and_remove_repos(
 
 
 def test_atlas_cli_rejects_duplicate_repo(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ):
+    calls = []
+
+    def fake_verify(repo: str) -> str:
+        calls.append(repo)
+        return "main"
+
+    monkeypatch.setattr(install_github, "verify_backlog_atlas_installed", fake_verify)
     config = tmp_path / "atlas.yaml"
     sys.argv = [
         "backlog-atlas",
@@ -1010,6 +1020,114 @@ def test_atlas_cli_rejects_duplicate_repo(
     assert ub.main() == 1
 
     assert "omry/omegaconf is already tracked" in capsys.readouterr().err
+    assert calls == ["omry/omegaconf"]
+
+
+def test_atlas_cli_add_validates_full_github_url_before_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    calls = []
+
+    def fake_verify(repo: str) -> str:
+        calls.append(repo)
+        return "main"
+
+    monkeypatch.setattr(install_github, "verify_backlog_atlas_installed", fake_verify)
+    config = tmp_path / "atlas.yaml"
+    sys.argv = [
+        "backlog-atlas",
+        "atlas",
+        "add",
+        "https://github.com/omry/omegaconf.git",
+        "--config",
+        str(config),
+    ]
+
+    assert ub.main() == 0
+
+    assert calls == ["omry/omegaconf"]
+
+
+def test_atlas_cli_add_rejects_repo_without_backlog_atlas_install(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    config = tmp_path / "atlas.yaml"
+
+    def fail_verify(repo: str) -> str:
+        raise install_github.UserError(
+            f"{repo} does not appear to have Backlog Atlas installed"
+        )
+
+    monkeypatch.setattr(install_github, "verify_backlog_atlas_installed", fail_verify)
+    sys.argv = [
+        "backlog-atlas",
+        "atlas",
+        "add",
+        "omry/omegaconf",
+        "--config",
+        str(config),
+    ]
+
+    assert ub.main() == 1
+
+    assert not config.exists()
+    assert "does not appear to have Backlog Atlas installed" in capsys.readouterr().err
+
+
+def test_verify_backlog_atlas_installed_checks_repo_and_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    def fake_run_gh(args: list[str], input_text: str | None = None) -> str:
+        assert input_text is None
+        assert args == ["api", "repos/o/r"]
+        return json.dumps({"default_branch": "develop"})
+
+    monkeypatch.setattr(install_github, "run_gh", fake_run_gh)
+    monkeypatch.setattr(
+        install_github,
+        "github_file_text",
+        lambda repo, branch, path: json.dumps({"tool": "backlog-atlas", "files": []}),
+    )
+
+    assert install_github.verify_backlog_atlas_installed("o/r") == "develop"
+
+
+def test_verify_backlog_atlas_installed_rejects_missing_repo(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    def fake_run_gh(args: list[str], input_text: str | None = None) -> str:
+        raise install_github.UserError(
+            "gh api repos/o/missing failed: gh: Not Found (HTTP 404)"
+        )
+
+    monkeypatch.setattr(install_github, "run_gh", fake_run_gh)
+
+    with pytest.raises(install_github.UserError) as exc:
+        install_github.verify_backlog_atlas_installed("o/missing")
+
+    assert "GitHub could not find o/missing" in str(exc.value)
+
+
+def test_verify_backlog_atlas_installed_rejects_missing_install_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(
+        install_github,
+        "run_gh",
+        lambda args, input_text=None: json.dumps({"default_branch": "main"}),
+    )
+    monkeypatch.setattr(
+        install_github,
+        "github_file_text",
+        lambda repo, branch, path: None,
+    )
+
+    with pytest.raises(install_github.UserError) as exc:
+        install_github.verify_backlog_atlas_installed("o/r")
+
+    message = str(exc.value)
+    assert "does not appear to have Backlog Atlas installed" in message
+    assert "https://github.com/o/r@main:.github/backlog-atlas/manifest.json" in message
 
 
 def test_install_help_prefers_repository_url(capsys: pytest.CaptureFixture[str]):

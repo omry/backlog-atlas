@@ -1393,6 +1393,8 @@ def run_atlas_list(args: argparse.Namespace) -> int:
 
 
 def run_atlas_add(args: argparse.Namespace) -> int:
+    from .install import github as install_github
+
     path = atlas_config_path(args.config)
     config = load_mutable_atlas_config(path, create=True)
     assert config is not None
@@ -1401,6 +1403,7 @@ def run_atlas_add(args: argparse.Namespace) -> int:
     if any(normalize_github_repo(entry["repo"]) == repo for entry in entries):
         raise UserError(f"{repo} is already tracked in {path}")
 
+    install_github.verify_backlog_atlas_installed(repo)
     config.repos.append(
         {
             "repo": repo,

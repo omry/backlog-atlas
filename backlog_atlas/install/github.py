@@ -13,6 +13,7 @@ from .artifacts import (
     manifest_bundled_package_paths,
     load_upgrade_cleanup_workflow_template,
     load_workflow_template,
+    parse_install_manifest,
 )
 from .commands import run_gh, try_gh
 from .constants import (
@@ -36,6 +37,23 @@ from .models import (
 
 def github_default_branch(repo: str) -> str:
     data = json.loads(run_gh(["api", f"repos/{repo}"]))
+    return data.get("default_branch") or "main"
+
+
+def verify_remote_repo_readable(repo: str) -> str:
+    try:
+        data = json.loads(run_gh(["api", f"repos/{repo}"]))
+    except UserError as e:
+        details = str(e)
+        if "HTTP 404" in details or "Not Found" in details:
+            raise UserError(
+                f"GitHub could not find {repo}. Check the repository URL "
+                "and that the current gh authentication can access it"
+            ) from e
+        raise UserError(
+            f"could not verify GitHub repository {repo}; run gh auth status "
+            f"and try again: {e}"
+        ) from e
     return data.get("default_branch") or "main"
 
 
@@ -103,6 +121,20 @@ def remote_installed_bundled_package_paths(repo: str, branch: str) -> list[str]:
         return []
     package_paths = manifest_bundled_package_paths(manifest)
     return package_paths or []
+
+
+def verify_backlog_atlas_installed(repo: str) -> str:
+    branch = verify_remote_repo_readable(repo)
+    manifest = github_file_text(repo, branch, INSTALL_MANIFEST_RELATIVE_PATH)
+    if manifest is None or parse_install_manifest(manifest) is None:
+        raise UserError(
+            f"{repo} does not appear to have Backlog Atlas installed.\n\n"
+            "Expected to find a valid Backlog Atlas install manifest at:\n"
+            f"  https://github.com/{repo}@{branch}:{INSTALL_MANIFEST_RELATIVE_PATH}\n\n"
+            f"Run `backlog-atlas install --repo https://github.com/{repo}` in "
+            "that repository, merge the install, then rerun `backlog-atlas atlas add`."
+        )
+    return branch
 
 
 def remote_config_text(repo: str, branch: str) -> str | None:

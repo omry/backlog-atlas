@@ -211,7 +211,9 @@ backlog-atlas atlas remove facebookresearch/hydra
 ```
 
 Without `--backlog-url`, `atlas add` defaults to
-`https://OWNER.github.io/REPO/backlog.json`.
+`https://OWNER.github.io/REPO/backlog.json`. `atlas add` validates that GitHub
+can see the repository and that Backlog Atlas is installed there before updating
+`atlas.yaml`.
 
 Edit the YAML directly when you want OmegaConf interpolation or separate local
 and published URLs:
