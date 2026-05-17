@@ -193,6 +193,33 @@ python3 -m http.server 8000
 
 Then open `http://localhost:8000/`.
 
+## Browser-Federated Multi-Repo Preview
+
+For a lightweight multi-repo dashboard, place an `atlas.json` file next to
+`index.html`. The browser loads each listed `backlog.json` and merges the
+datasets locally:
+
+```json
+{
+  "title": "Team Backlog",
+  "repos": [
+    {
+      "repo": "owner/service-a",
+      "backlog_url": "https://owner.github.io/service-a/backlog.json"
+    },
+    {
+      "repo": "owner/service-b",
+      "backlog_url": "https://owner.github.io/service-b/backlog.json"
+    }
+  ]
+}
+```
+
+If `atlas.json` is not present, the UI falls back to the single-repo
+`backlog.json` behavior. Browser federation is intended for public or otherwise
+browser-readable datasets; it does not add credentials or server-side
+aggregation.
+
 ## Uninstall
 
 From a local checkout of the target repository:

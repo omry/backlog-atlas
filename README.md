@@ -36,6 +36,9 @@ The `backlog-atlas` branch contains:
 - `last_snapshot.json` — internal diff state for the next run.
 - `index.html` — the static dashboard.
 
+The dashboard can also load an optional `atlas.json` manifest next to
+`index.html` and federate multiple public `backlog.json` files in the browser.
+
 The default branch only needs the installed workflow, manifest, and config:
 
 - `.github/workflows/update-backlog-atlas.yml`

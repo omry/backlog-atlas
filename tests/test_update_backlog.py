@@ -813,6 +813,18 @@ def test_workflow_template_substitutes_install_source():
     assert "${{ github.event.action }}" in out
 
 
+def test_web_ui_supports_browser_federated_manifest():
+    content = (
+        Path(__file__).resolve().parent.parent / "backlog_atlas" / "web" / "index.html"
+    ).read_text(encoding="utf-8")
+
+    assert 'fetch("atlas.json")' in content
+    assert "backlog_url" in content
+    assert 'id="repo-pills"' in content
+    assert 'data-key="repo"' in content
+    assert "loadBacklogData" in content
+
+
 def test_install_help_prefers_repository_url(capsys: pytest.CaptureFixture[str]):
     sys.argv = ["backlog-atlas", "install", "--help"]
 
