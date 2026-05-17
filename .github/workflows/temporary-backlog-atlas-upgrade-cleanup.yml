@@ -18,7 +18,7 @@ permissions:
 env:
   BACKLOG_ATLAS_BRANCH: backlog-atlas
   BACKLOG_ATLAS_CLEANUP_WORKFLOW: ".github/workflows/temporary-backlog-atlas-upgrade-cleanup.yml"
-  BACKLOG_ATLAS_REMOVE_PACKAGES_JSON: '[".backlog-atlas/packages/backlog_atlas-0.11-0.g7375c50eac39-py3-none-any.whl"]'
+  BACKLOG_ATLAS_REMOVE_PACKAGES_JSON: '[".backlog-atlas/packages/backlog_atlas-0.11-0.ga2c36f8ff585-py3-none-any.whl"]'
 
 jobs:
   cleanup:
