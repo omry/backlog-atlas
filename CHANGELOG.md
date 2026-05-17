@@ -5,6 +5,10 @@ Keep entries user-facing and grouped by released version.
 
 ## Unreleased
 
+- Nothing yet.
+
+## 0.13
+
 - Added browser-based multi-repository dashboards driven by an atlas manifest,
   including `atlas.yaml` compilation and CLI helpers for managing tracked repos.
 - Added issue classification preview output so maintainers can inspect how
