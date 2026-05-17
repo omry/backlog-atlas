@@ -6,13 +6,13 @@ import json
 import re
 import sys
 from collections import defaultdict
-from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 
+from . import config as app_config
 from .errors import UserError
 from .install.cli import (
     add_install_args,
@@ -25,142 +25,14 @@ from .install.repo import detect_target_root, resolve_repo
 
 PROJECT_DIR = Path(__file__).resolve().parent
 WEB_DIR = PROJECT_DIR / "web"
-CONFIG_PATH = PROJECT_DIR / "config.yaml"
+CONFIG_PATH = app_config.PACKAGE_CONFIG_PATH
+BacklogConfig = app_config.BacklogConfig
+CategoryConfig = app_config.CategoryConfig
+_DEFAULT_CATEGORIES = app_config._DEFAULT_CATEGORIES
+category_matchers = app_config.category_matchers
+load_config = app_config.load_config
 
 STATUS_ORDER = ["in progress", "community PR", "blocked", "not started", "done"]
-
-
-@dataclass
-class CategoryConfig:
-    emoji: str = ""
-    labels: list[str] = field(default_factory=list)
-    keywords: list[str] = field(default_factory=list)
-
-
-@dataclass
-class BacklogConfig:
-    done_expire_days: int | None = 14
-    updates_jsonl_filename: str = "updates.jsonl"
-    data_json_filename: str = "backlog.json"
-    data_updates_limit: int = 200
-    blocked_labels: list[str] = field(default_factory=lambda: ["awaiting response"])
-    repo: str | None = None
-    issue_url_template: str = "https://github.com/${repo}/issues/{number}"
-    pr_url_template: str = "https://github.com/${repo}/pull/{number}"
-    status_emojis: dict[str, str] = field(
-        default_factory=lambda: {
-            "in progress": "🔄",
-            "community PR": "🤝",
-            "blocked": "🚫",
-            "not started": "⬜",
-            "done": "✅",
-        }
-    )
-    categories: dict[str, CategoryConfig] = field(
-        default_factory=lambda: {
-            k: CategoryConfig(
-                emoji=v.emoji, labels=list(v.labels), keywords=list(v.keywords)
-            )
-            for k, v in _DEFAULT_CATEGORIES.items()
-        }
-    )
-
-
-def load_config() -> DictConfig:
-    defaults = OmegaConf.structured(BacklogConfig)
-    if CONFIG_PATH.exists():
-        return cast(DictConfig, OmegaConf.merge(defaults, OmegaConf.load(CONFIG_PATH)))
-    return defaults
-
-
-_DEFAULT_CATEGORIES: dict[str, CategoryConfig] = {
-    "Bug": CategoryConfig(
-        emoji="🐛",
-        labels=["bug"],
-        keywords=[
-            "bug",
-            "error",
-            "fail",
-            "broken",
-            "crash",
-            "exception",
-            "runtimeerror",
-            "assertionerror",
-        ],
-    ),
-    "Enhancement": CategoryConfig(
-        emoji="✨",
-        labels=[
-            "enhancement",
-            "good first issue",
-            "help wanted",
-            "performance",
-            "duplicate",
-            "invalid",
-            "wontfix",
-            "discussion",
-            "awaiting response",
-            "wishlist",
-        ],
-        keywords=[
-            "feature",
-            "add",
-            "support",
-            "allow",
-            "enable",
-            "implement",
-            "enhancement",
-            "request",
-            "wishlist",
-            "consider",
-            "performance",
-            "speed",
-            "slow",
-            "optimize",
-            "memory",
-            "cpu",
-            "latency",
-        ],
-    ),
-    "Documentation": CategoryConfig(
-        emoji="📄",
-        labels=["documentation"],
-        keywords=["doc", "documentation", "readme", "comment", "typo", "spelling"],
-    ),
-    "Question": CategoryConfig(
-        emoji="❓",
-        labels=["question"],
-        keywords=["question", "how to", "help", "confused", "unclear", "wonder"],
-    ),
-    "Refactor": CategoryConfig(
-        emoji="🔧",
-        labels=["refactor"],
-        keywords=[
-            "refactor",
-            "cleanup",
-            "clean up",
-            "remove",
-            "delete",
-            "deprecated",
-            "modernize",
-        ],
-    ),
-    "Build": CategoryConfig(
-        emoji="🏗️",
-        labels=["build", "dependencies"],
-        keywords=[
-            "build",
-            "package",
-            "release",
-            "ci",
-            "github actions",
-            "setup.py",
-            "pyproject",
-            "wheel",
-            "packaging",
-        ],
-    ),
-}
 
 
 def split_repo(repo: str) -> tuple[str, str]:
@@ -1077,13 +949,7 @@ def run_update(args: argparse.Namespace) -> int:
         if args.updates_jsonl_path
         else state_dir / cfg.updates_jsonl_filename
     )
-    categories: dict[str, CategoryConfig] = OmegaConf.to_object(cfg.categories)  # type: ignore[assignment]
-    label_to_category: dict[str, str] = {
-        label: cat for cat, c in categories.items() for label in c.labels
-    }
-    category_keywords: dict[str, list[str]] = {
-        cat: c.keywords for cat, c in categories.items()
-    }
+    label_to_category, category_keywords = category_matchers(cfg)
 
     previous_snapshot = load_json_file(snapshot_path)
     if previous_snapshot and previous_snapshot.get("repo") not in {None, repo}:
