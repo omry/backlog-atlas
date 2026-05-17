@@ -201,29 +201,61 @@ to `atlas.json` next to `index.html`. The browser loads each listed
 
 ```yaml
 title: OmegaConf + Hydra Backlog
-base_url: https://example.com/backlogs
+target: ${oc.env:BACKLOG_ATLAS_TARGET,published}
+
+urls:
+  published:
+    omegaconf: https://omry.github.io/omegaconf/backlog.json
+    hydra: https://facebookresearch.github.io/hydra/backlog.json
+  local:
+    omegaconf: ./omegaconf/backlog.json
+    hydra: ./hydra/backlog.json
 
 repos:
   - repo: omry/omegaconf
-    backlog_url: ${base_url}/omegaconf/backlog.json
+    backlog_url: ${urls.${target}.omegaconf}
   - repo: facebookresearch/hydra
-    backlog_url: ${base_url}/hydra/backlog.json
+    backlog_url: ${urls.${target}.hydra}
 ```
 
 ```sh
 backlog-atlas dump-web --output /tmp/backlog-atlas-preview/
-backlog-atlas dump-atlas \
+BACKLOG_ATLAS_TARGET=local backlog-atlas dump-atlas \
   --config .github/backlog-atlas/atlas.yaml \
   --output /tmp/backlog-atlas-preview/
 ```
 
-The YAML is read with OmegaConf, so interpolations such as `${base_url}` are
-resolved before writing the materialized browser JSON. If generated `atlas.json`
-is not present, the UI falls back to the single-repo `backlog.json` behavior. If
-`atlas.json` exists but is invalid, or one of its listed datasets cannot be
-loaded, the page shows a load error instead of silently switching modes. Browser
-federation is intended for public or otherwise browser-readable datasets; it
-does not add credentials or server-side aggregation.
+The YAML is read with OmegaConf, so interpolations such as
+`${urls.${target}.omegaconf}` are resolved before writing the materialized
+browser JSON. `BACKLOG_ATLAS_TARGET=local` lets you test local files before
+publishing; leaving it unset emits the published URLs.
+
+To generate local datasets for the preview, run `backlog-atlas update` from each
+repository checkout and point its output at the matching preview subdirectory:
+
+```sh
+mkdir -p /tmp/backlog-atlas-preview/omegaconf
+cd /path/to/omegaconf
+backlog-atlas update \
+  --repo https://github.com/omry/omegaconf \
+  --data-json-path /tmp/backlog-atlas-preview/omegaconf/backlog.json \
+  --snapshot-path /tmp/backlog-atlas-preview/omegaconf/last_snapshot.json \
+  --updates-jsonl-path /tmp/backlog-atlas-preview/omegaconf/updates.jsonl
+```
+
+Repeat that for each repo listed in `atlas.yaml`, then serve the preview:
+
+```sh
+cd /tmp/backlog-atlas-preview
+python3 -m http.server 8000
+```
+
+If generated `atlas.json` is not present, the UI falls back to the single-repo
+`backlog.json` behavior. If `atlas.json` exists but is invalid, or one of its
+listed datasets cannot be loaded, the page shows a load error instead of
+silently switching modes. Browser federation is intended for public or otherwise
+browser-readable datasets; it does not add credentials or server-side
+aggregation.
 
 ## Uninstall
 
