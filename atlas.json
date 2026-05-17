@@ -1,15 +1,15 @@
 {
   "repos": [
     {
-      "backlog_url": "https://omry.github.io/omegaconf/backlog.json",
+      "backlog_url": "https://raw.githubusercontent.com/omry/omegaconf/backlog-atlas/backlog.json",
       "repo": "omry/omegaconf"
     },
     {
-      "backlog_url": "https://facebookresearch.github.io/hydra/backlog.json",
+      "backlog_url": "https://raw.githubusercontent.com/facebookresearch/hydra/backlog-atlas/backlog.json",
       "repo": "facebookresearch/hydra"
     },
     {
-      "backlog_url": "https://omry.github.io/backlog-atlas/backlog.json",
+      "backlog_url": "https://raw.githubusercontent.com/omry/backlog-atlas/backlog-atlas/backlog.json",
       "repo": "omry/backlog-atlas"
     }
   ]
