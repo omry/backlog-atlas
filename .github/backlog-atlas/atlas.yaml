@@ -1,0 +1,7 @@
+repos:
+- repo: omry/omegaconf
+  backlog_url: https://omry.github.io/omegaconf/backlog.json
+- repo: facebookresearch/hydra
+  backlog_url: https://facebookresearch.github.io/hydra/backlog.json
+- repo: omry/backlog-atlas
+  backlog_url: https://omry.github.io/backlog-atlas/backlog.json
