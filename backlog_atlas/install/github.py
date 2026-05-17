@@ -106,7 +106,28 @@ def remote_installed_bundled_package_paths(repo: str, branch: str) -> list[str]:
 
 
 def remote_config_text(repo: str, branch: str) -> str | None:
-    return github_file_text(repo, branch, APP_CONFIG_RELATIVE_PATH)
+    output = try_gh(
+        ["api", f"repos/{repo}/contents/{APP_CONFIG_RELATIVE_PATH}?ref={branch}"]
+    )
+    if not output:
+        return None
+    source = remote_config_source(repo, branch)
+    data = json.loads(output)
+    if data.get("encoding") != "base64" or not isinstance(data.get("content"), str):
+        raise UserError(
+            "remote Backlog Atlas config is not readable:\n"
+            f"  {source}\n\n"
+            "The file exists, but GitHub did not return base64 text content."
+        )
+    content = "".join(data["content"].split())
+    try:
+        return base64.b64decode(content, validate=True).decode()
+    except (binascii.Error, UnicodeDecodeError) as e:
+        raise UserError(
+            "remote Backlog Atlas config is not readable:\n"
+            f"  {source}\n\n"
+            "The file exists, but it could not be decoded as UTF-8 YAML."
+        ) from e
 
 
 def remote_config_source(repo: str, branch: str) -> str:

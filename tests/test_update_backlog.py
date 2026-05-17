@@ -669,8 +669,8 @@ def test_classify_remote_uses_remote_config(
     monkeypatch.setattr(install_github, "github_default_branch", lambda repo: "main")
     monkeypatch.setattr(
         install_github,
-        "github_file_text",
-        lambda repo, branch, path: (
+        "remote_config_text",
+        lambda repo, branch: (
             "categories:\n" "  Remote:\n" "    labels: [remote]\n" "    keywords: []\n"
         ),
     )
@@ -708,9 +708,7 @@ def test_classify_remote_rejects_missing_remote_config(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ):
     monkeypatch.setattr(install_github, "github_default_branch", lambda repo: "main")
-    monkeypatch.setattr(
-        install_github, "github_file_text", lambda repo, branch, path: None
-    )
+    monkeypatch.setattr(install_github, "remote_config_text", lambda repo, branch: None)
     monkeypatch.setattr(
         ub,
         "fetch_issue",
@@ -2387,6 +2385,44 @@ def test_install_remote_config_validation_rejects_invalid_config(
 
     message = str(exc.value)
     assert "existing Backlog Atlas config is invalid" in message
+    assert "https://github.com/o/r@main:.github/backlog-atlas/config.yaml" in message
+
+
+def test_install_remote_config_validation_rejects_unparsable_yaml(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(
+        install_github,
+        "remote_config_text",
+        lambda repo, branch: "categories:\n  Broken: [\n",
+    )
+
+    with pytest.raises(install_github.UserError) as exc:
+        install_github.validate_remote_config("o/r", "main")
+
+    message = str(exc.value)
+    assert "existing Backlog Atlas config is invalid" in message
+    assert "https://github.com/o/r@main:.github/backlog-atlas/config.yaml" in message
+
+
+def test_install_remote_config_validation_rejects_unreadable_config(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    payload = {
+        "encoding": "base64",
+        "content": "not valid base64",
+    }
+    monkeypatch.setattr(
+        install_github,
+        "try_gh",
+        lambda args: json.dumps(payload),
+    )
+
+    with pytest.raises(install_github.UserError) as exc:
+        install_github.validate_remote_config("o/r", "main")
+
+    message = str(exc.value)
+    assert "remote Backlog Atlas config is not readable" in message
     assert "https://github.com/o/r@main:.github/backlog-atlas/config.yaml" in message
 
 

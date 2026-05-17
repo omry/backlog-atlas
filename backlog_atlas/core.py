@@ -1025,9 +1025,7 @@ def load_remote_config(repo: str) -> tuple[DictConfig, str]:
 
     branch = install_github.github_default_branch(repo)
     source = remote_config_source(repo, branch)
-    content = install_github.github_file_text(
-        repo, branch, app_config.APP_CONFIG_RELATIVE_PATH
-    )
+    content = install_github.remote_config_text(repo, branch)
     if content is None:
         raise UserError(
             "remote Backlog Atlas config was not found:\n"

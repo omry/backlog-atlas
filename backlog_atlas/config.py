@@ -173,12 +173,20 @@ def _format_config_error(source: str, error: Exception) -> UserError:
     )
 
 
+def _is_yaml_error(error: Exception) -> bool:
+    return type(error).__module__.split(".", 1)[0] == "yaml"
+
+
 def merge_config_content(content: str, source: str) -> DictConfig:
     try:
         cfg = OmegaConf.merge(_base_config(), OmegaConf.create(content))
         OmegaConf.to_container(cfg, resolve=False)
     except (OSError, OmegaConfBaseException, ValueError, TypeError) as e:
         raise _format_config_error(source, e) from e
+    except Exception as e:
+        if _is_yaml_error(e):
+            raise _format_config_error(source, e) from e
+        raise
     return cast(DictConfig, cfg)
 
 
