@@ -45,7 +45,7 @@ def ensure_worktree_clean(target_root: Path, vcs: str) -> bool:
     if output.strip():
         print(
             f"error: {target_root} has uncommitted changes; "
-            "commit or stash them before installing",
+            "commit or stash them before continuing",
             file=sys.stderr,
         )
         return False
@@ -55,30 +55,52 @@ def ensure_worktree_clean(target_root: Path, vcs: str) -> bool:
 def add_local_install_files(
     target_root: Path, artifact_paths: list[Path], vcs: str
 ) -> None:
+    if not artifact_paths:
+        return
     rel_paths = [path.relative_to(target_root).as_posix() for path in artifact_paths]
     if vcs == "sl":
-        run_command(["sl", "add", *rel_paths], cwd=target_root)
+        run_command(["sl", "addremove", *rel_paths], cwd=target_root)
     elif vcs == "git":
-        run_command(["git", "add", *rel_paths], cwd=target_root)
+        run_command(["git", "add", "-A", "--", *rel_paths], cwd=target_root)
     else:
         raise RuntimeError(f"unsupported VCS: {vcs}")
 
 
-def local_install_commands(
-    vcs: str, on_default: bool | None, install_source: InstallSource
-) -> list[str]:
-    commit_msg = f'"{install_commit_message(install_source)}"'
+def commit_local_files(
+    target_root: Path, artifact_paths: list[Path], vcs: str, message: str
+) -> None:
+    if not artifact_paths:
+        return
+    rel_paths = [path.relative_to(target_root).as_posix() for path in artifact_paths]
     if vcs == "sl":
-        return [f"sl commit -m {commit_msg}", "sl push"]
+        run_command(["sl", "commit", "-m", message, *rel_paths], cwd=target_root)
+        return
     if vcs == "git":
-        push = "git push" if on_default is True else "git push -u origin HEAD"
-        return [f"git commit -m {commit_msg}", push]
+        run_command(
+            ["git", "commit", "-m", message, "--only", "--", *rel_paths],
+            cwd=target_root,
+        )
+        return
     raise RuntimeError(f"unsupported VCS: {vcs}")
 
 
-def print_local_install_next_steps(
-    repo_name: str, target_root: Path, vcs: str, install_source: InstallSource
-) -> None:
+def local_review_command(vcs: str) -> str:
+    if vcs == "sl":
+        return "sl show --stat"
+    if vcs == "git":
+        return "git show --stat HEAD"
+    raise RuntimeError(f"unsupported VCS: {vcs}")
+
+
+def local_push_command(vcs: str, on_default: bool | None) -> str:
+    if vcs == "sl":
+        return "sl push"
+    if vcs == "git":
+        return "git push" if on_default is True else "git push -u origin HEAD"
+    raise RuntimeError(f"unsupported VCS: {vcs}")
+
+
+def print_local_install_next_steps(repo_name: str, target_root: Path, vcs: str) -> None:
     color = color_enabled()
     print()
     print(style("Next steps:", ANSI_BOLD, color))
@@ -86,9 +108,11 @@ def print_local_install_next_steps(
     if Path.cwd().resolve() != target_root.resolve():
         print(style(f"cd {target_root}", ANSI_COMMAND, color))
         print()
-    print(style("# Commit and push the install files.", ANSI_DIM, color))
-    for command in local_install_commands(vcs, on_default, install_source):
-        print(style(command, ANSI_COMMAND, color))
+    print(style("# Review the install commit.", ANSI_DIM, color))
+    print(style(local_review_command(vcs), ANSI_COMMAND, color))
+    print()
+    print(style("# Push when ready.", ANSI_DIM, color))
+    print(style(local_push_command(vcs, on_default), ANSI_COMMAND, color))
     print()
     if on_default is False:
         print(
@@ -125,12 +149,45 @@ def print_local_install_next_steps(
     print(style(f"# https://github.com/{repo_name}/settings/pages", ANSI_URL, color))
 
 
+def print_local_uninstall_next_steps(target_root: Path, vcs: str) -> None:
+    color = color_enabled()
+    print()
+    print(style("Next steps:", ANSI_BOLD, color))
+    on_default = repo.is_on_default_branch(target_root, vcs)
+    if Path.cwd().resolve() != target_root.resolve():
+        print(style(f"cd {target_root}", ANSI_COMMAND, color))
+        print()
+    print(style("# Review the uninstall commit.", ANSI_DIM, color))
+    print(style(local_review_command(vcs), ANSI_COMMAND, color))
+    print()
+    print(style("# Push when ready.", ANSI_DIM, color))
+    print(style(local_push_command(vcs, on_default), ANSI_COMMAND, color))
+    print()
+    if on_default is False:
+        print(
+            style(
+                "# Open or merge a PR for this uninstall commit before continuing.",
+                ANSI_DIM,
+                color,
+            )
+        )
+    elif on_default is None:
+        print(
+            style(
+                "# If this is not the default branch, merge the uninstall commit first.",
+                ANSI_DIM,
+                color,
+            )
+        )
+
+
 def print_local_install_plan(
     repo_name: str,
     target_root: Path,
     install_source: InstallSource,
     vcs: str,
     force: bool = False,
+    cleanup_old_bundled_packages: bool = False,
 ) -> None:
     print("Dry run: would install Backlog Atlas locally")
     print("No files would be written and no GitHub calls would be made.")
@@ -150,11 +207,20 @@ def print_local_install_plan(
             else "Would upload bundled wheel"
         )
         print(f"{action} to {BACKLOG_BRANCH}: " f"{install_source.bundled_wheel_path}")
+    print("Would first remove previous install hooks/manifests if present.")
+    if cleanup_old_bundled_packages:
+        print(
+            "Would write a temporary upgrade cleanup workflow that removes old "
+            "bundled wheels after the install lands."
+        )
     print("Would write or update:")
     print(f"  - {artifacts.find_workflow_target(target_root)}")
     print(f"  - {artifacts.find_install_metadata_target(target_root)}")
-    print(f"Would add install artifact(s) with {vcs}.")
-    print("Would print commit, push, workflow trigger, and Pages setup next steps.")
+    print(f"  - {artifacts.find_install_manifest_target(target_root)}")
+    if cleanup_old_bundled_packages:
+        print(f"  - {artifacts.find_upgrade_cleanup_workflow_target(target_root)}")
+    print(f"Would add and commit install artifact(s) with {vcs}.")
+    print("Would print review, push, workflow trigger, and Pages setup next steps.")
 
 
 def run_local_install(
@@ -165,9 +231,19 @@ def run_local_install(
     force: bool = False,
 ) -> int:
     vcs = repo.detect_local_vcs(target_root)
+    old_bundled_package_paths = artifacts.installed_bundled_package_paths(target_root)
+    cleanup_package_paths = artifacts.bundled_package_paths_to_cleanup(
+        install_source,
+        old_bundled_package_paths,
+    )
     if dry_run:
         print_local_install_plan(
-            repo_name, target_root, install_source, vcs, force=force
+            repo_name,
+            target_root,
+            install_source,
+            vcs,
+            force=force,
+            cleanup_old_bundled_packages=bool(cleanup_package_paths),
         )
         return 0
 
@@ -178,25 +254,64 @@ def run_local_install(
         if ensure_worktree_clean(target_root, vcs) is False:
             return 1
         print("Working tree is clean")
-    github.ensure_backlog_branch_with_bundle(repo_name, install_source)
 
     print(f"Target repo: {repo_name}")
     print(f"Target working tree: {target_root}")
     print(f"Workflow will install Backlog Atlas from: {install_source.pip_spec}")
     print(f"Resolved install: {describe_install_source(install_source)}")
+    workflow_blocks_install = artifacts.workflow_blocks_install(
+        target_root,
+        install_source,
+        force=force,
+    )
+    if not workflow_blocks_install:
+        github.ensure_backlog_branch_with_bundle(repo_name, install_source)
 
-    result = artifacts.write_install_artifacts(target_root, install_source, force=force)
+    if workflow_blocks_install:
+        removed_paths = []
+    else:
+        removed_paths = artifacts.remove_install_artifacts(target_root)
+    if removed_paths:
+        print("Removed previous Backlog Atlas install hook/manifest files")
+
+    result = artifacts.write_install_artifacts(
+        target_root,
+        install_source,
+        force=force,
+        old_bundled_package_paths=old_bundled_package_paths,
+    )
     print("Checked install workflow and metadata")
-    if result.changed_paths:
+    changed_paths = unique_paths([*result.changed_paths, *removed_paths])
+    if changed_paths:
         if result.workflow_path in result.changed_paths:
             print(f"wrote workflow to {result.workflow_path}")
         else:
             print(f"workflow already exists at {result.workflow_path}")
         if result.metadata_path in result.changed_paths:
             print(f"wrote install metadata to {result.metadata_path}")
-        add_local_install_files(target_root, result.changed_paths, vcs)
+        if result.manifest_path in result.changed_paths:
+            print(f"wrote install manifest to {result.manifest_path}")
+        if result.upgrade_cleanup_path in result.changed_paths:
+            if cleanup_package_paths:
+                print(
+                    "wrote temporary upgrade cleanup workflow to "
+                    f"{result.upgrade_cleanup_path}"
+                )
+            else:
+                print(
+                    "removed temporary upgrade cleanup workflow from "
+                    f"{result.upgrade_cleanup_path}"
+                )
+        add_local_install_files(target_root, changed_paths, vcs)
         print(f"added install artifact(s) with {vcs}")
-        print_local_install_next_steps(repo_name, target_root, vcs, install_source)
+        commit_local_files(
+            target_root,
+            changed_paths,
+            vcs,
+            install_commit_message(install_source),
+        )
+        print("created install commit")
+        print_local_install_next_steps(repo_name, target_root, vcs)
     else:
         print(f"workflow already exists at {result.workflow_path}")
         if result.workflow_matches:
@@ -209,3 +324,14 @@ def run_local_install(
             )
             print("\nNothing changed.")
     return 0
+
+
+def unique_paths(paths: list[Path]) -> list[Path]:
+    seen: set[Path] = set()
+    unique = []
+    for path in paths:
+        if path in seen:
+            continue
+        seen.add(path)
+        unique.append(path)
+    return unique

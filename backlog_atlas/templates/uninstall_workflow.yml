@@ -11,7 +11,7 @@ permissions:
 
 env:
   BACKLOG_ATLAS_BRANCH: __BACKLOG_ATLAS_BRANCH__
-  BACKLOG_ATLAS_DELETE_BRANCH: "__BACKLOG_ATLAS_DELETE_BRANCH__"
+  BACKLOG_ATLAS_CLEAN_UNINSTALL: "__BACKLOG_ATLAS_CLEAN_UNINSTALL__"
 
 jobs:
   uninstall:
@@ -26,7 +26,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
       - name: Delete Backlog Atlas branch
-        if: env.BACKLOG_ATLAS_DELETE_BRANCH == 'true'
+        if: env.BACKLOG_ATLAS_CLEAN_UNINSTALL == 'true'
         run: |
           if git ls-remote --exit-code --heads origin "$BACKLOG_ATLAS_BRANCH" >/dev/null 2>&1; then
             git push origin --delete "$BACKLOG_ATLAS_BRANCH"
@@ -34,12 +34,117 @@ jobs:
           else
             echo "::notice title=Backlog Atlas uninstalled::$BACKLOG_ATLAS_BRANCH branch was already absent."
           fi
+      - name: Remove bundled install packages
+        if: env.BACKLOG_ATLAS_CLEAN_UNINSTALL != 'true'
+        run: |
+          python3 - <<'PY' > /tmp/backlog-atlas-remove-branch-paths
+          import json
+          from pathlib import PurePosixPath
+
+          fallback = [".backlog-atlas/packages"]
+
+          def safe(path):
+              if not isinstance(path, str) or "\n" in path or path.startswith("/"):
+                  return False
+              parts = PurePosixPath(path).parts
+              return ".." not in parts and path not in {"", "."}
+
+          try:
+              with open(".github/backlog-atlas/manifest.json", encoding="utf-8") as f:
+                  manifest = json.load(f)
+              files = manifest.get("files")
+              if manifest.get("tool") != "backlog-atlas" or not isinstance(files, list):
+                  raise ValueError("unrecognized manifest")
+              paths = []
+              for entry in files:
+                  if not isinstance(entry, dict) or entry.get("branch") != "__BACKLOG_ATLAS_BRANCH__":
+                      continue
+                  if entry.get("remove") == "uninstall":
+                      path = entry.get("path")
+                      if safe(path):
+                          paths.append(path)
+          except (OSError, ValueError, json.JSONDecodeError, UnicodeDecodeError):
+              paths = fallback
+
+          for path in dict.fromkeys(paths):
+              print(path)
+          PY
+
+          if ! [ -s /tmp/backlog-atlas-remove-branch-paths ]; then
+            echo "::notice title=Backlog Atlas uninstalled::No bundled install packages were listed."
+            exit 0
+          fi
+
+          if git ls-remote --exit-code --heads origin "$BACKLOG_ATLAS_BRANCH" >/dev/null 2>&1; then
+            git fetch origin "$BACKLOG_ATLAS_BRANCH"
+            git worktree add ../backlog-atlas-branch FETCH_HEAD
+            cd ../backlog-atlas-branch
+            xargs -r -d '\n' -a /tmp/backlog-atlas-remove-branch-paths git rm -r --ignore-unmatch --
+            if git diff --cached --quiet; then
+              echo "::notice title=Backlog Atlas uninstalled::No bundled install packages were present."
+            else
+              git commit -m "backlog: remove bundled install packages [skip ci]"
+              git push origin HEAD:"$BACKLOG_ATLAS_BRANCH"
+              echo "::notice title=Backlog Atlas uninstalled::Removed bundled install packages from $BACKLOG_ATLAS_BRANCH."
+            fi
+          else
+            echo "::notice title=Backlog Atlas uninstalled::$BACKLOG_ATLAS_BRANCH branch was already absent."
+          fi
       - name: Log retained Backlog Atlas branch
-        if: env.BACKLOG_ATLAS_DELETE_BRANCH != 'true'
+        if: env.BACKLOG_ATLAS_CLEAN_UNINSTALL != 'true'
         run: |
-          echo "::notice title=Backlog Atlas uninstalled::Workflow hook removed; retained $BACKLOG_ATLAS_BRANCH branch and generated artifacts."
-      - name: Remove uninstall workflow
+          echo "::notice title=Backlog Atlas uninstalled::Workflow hook and install manifests removed; retained $BACKLOG_ATLAS_BRANCH branch, generated artifacts, and config."
+      - name: Remove default branch install files
         run: |
-          git rm --ignore-unmatch .github/backlog-atlas.json .github/workflows/update-backlog-atlas.yml
-          git commit -m "backlog: uninstall workflow [skip ci]"
-          git push
+          python3 - <<'PY' > /tmp/backlog-atlas-remove-paths
+          import json
+          import os
+          from pathlib import PurePosixPath
+
+          clean = os.environ["BACKLOG_ATLAS_CLEAN_UNINSTALL"] == "true"
+          fallback = [
+              ".github/backlog-atlas.json",
+              ".github/backlog-atlas/manifest.json",
+              ".github/workflows/temporary-backlog-atlas-upgrade-cleanup.yml",
+              ".github/workflows/update-backlog-atlas.yml",
+          ]
+          if clean:
+              fallback.append(".github/backlog-atlas/config.yaml")
+
+          def safe(path):
+              if not isinstance(path, str) or "\n" in path or path.startswith("/"):
+                  return False
+              parts = PurePosixPath(path).parts
+              return ".." not in parts and path not in {"", "."}
+
+          try:
+              with open(".github/backlog-atlas/manifest.json", encoding="utf-8") as f:
+                  manifest = json.load(f)
+              files = manifest.get("files")
+              if manifest.get("tool") != "backlog-atlas" or not isinstance(files, list):
+                  raise ValueError("unrecognized manifest")
+              paths = []
+              for entry in files:
+                  if not isinstance(entry, dict) or entry.get("branch") != "default":
+                      continue
+                  remove = entry.get("remove")
+                  if remove == "uninstall" or (clean and remove == "clean"):
+                      path = entry.get("path")
+                      if safe(path):
+                          paths.append(path)
+          except (OSError, ValueError, json.JSONDecodeError, UnicodeDecodeError):
+              paths = fallback
+
+          for path in dict.fromkeys(paths):
+              print(path)
+          PY
+
+          if [ -s /tmp/backlog-atlas-remove-paths ]; then
+            xargs -r -d '\n' -a /tmp/backlog-atlas-remove-paths git rm --ignore-unmatch --
+          fi
+          if git diff --cached --quiet; then
+            echo "::notice title=Backlog Atlas uninstalled::Default branch install artifacts were already absent."
+          else
+            git commit -m "backlog: uninstall workflow [skip ci]"
+            git push
+          fi

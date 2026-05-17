@@ -40,6 +40,7 @@ The default branch only needs the installed workflow and metadata:
 
 - `.github/workflows/update-backlog-atlas.yml`
 - `.github/backlog-atlas.json`
+- `.github/backlog-atlas/manifest.json`
 
 ## Quick Start
 
@@ -51,9 +52,15 @@ backlog-atlas install
 ```
 
 The dry run previews the files and install source before anything is written.
-Commit and push the installed workflow and metadata, then enable GitHub Pages
-from the `backlog-atlas` branch. See the [User Guide](./USER-GUIDE.md) for the
-full local and remote install flows.
+Install is safe to rerun: it first removes old Backlog Atlas hooks/manifests and
+preserves config and generated dashboard history. When the previous install
+manifest lists bundled wheels, it writes a temporary cleanup workflow that
+removes those old wheels only after the new install lands.
+The manifest is the cleanup source of truth: it records installed files and
+which ones are removed only by clean uninstall. Review and push the install
+commit that Backlog Atlas creates, then enable GitHub Pages from the
+`backlog-atlas` branch. See the [User Guide](./USER-GUIDE.md) for the full
+local and remote install flows.
 
 ## CLI
 
@@ -61,7 +68,7 @@ full local and remote install flows.
 # install the workflow and metadata in a repository
 backlog-atlas install [flags]
 
-# remove the installed workflow and metadata
+# remove installed hooks/manifests; --clean also removes config and branch
 backlog-atlas uninstall [flags]
 
 # write the static web UI files for preview or packaging

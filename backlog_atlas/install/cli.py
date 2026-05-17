@@ -49,17 +49,19 @@ def run_uninstall(args: argparse.Namespace) -> int:
         Path(args.target_root) if args.target_root else repo.detect_target_root()
     )
     repo_name = repo.resolve_repo(args.repo, target_root)
-    delete_branch = bool(args.delete_branch)
+    clean = bool(args.clean or args.delete_branch)
+    vcs = repo.detect_local_vcs(target_root)
 
     print(f"Target repo: {repo_name}")
     print(f"Target working tree: {target_root}")
 
-    if delete_branch and not args.yes:
+    if clean and not args.yes:
         print("\nThis will:")
         print(
-            "  - write a one-shot uninstall workflow that deletes "
-            f"the {BACKLOG_BRANCH} branch on GitHub"
+            "  - write a one-shot clean uninstall workflow that deletes "
+            f"the {BACKLOG_BRANCH} branch"
         )
+        print("  - remove Backlog Atlas install config from the default branch")
         print("  - make that workflow remove itself after it runs")
         try:
             confirm = input("\nProceed? [y/N] ").strip().lower()
@@ -69,27 +71,62 @@ def run_uninstall(args: argparse.Namespace) -> int:
             print("Aborted.")
             return 1
 
+    if args.force:
+        print(f"Skipping working tree cleanliness check for {target_root} (--force)")
+    else:
+        print(f"Checking working tree at {target_root}")
+        if local.ensure_worktree_clean(target_root, vcs) is False:
+            return 1
+        print("Working tree is clean")
+
     wf_path = artifacts.find_workflow_target(target_root)
-    if not wf_path.exists() and not delete_branch:
-        print("\nNothing to do - Backlog Atlas workflow is not installed.")
+    had_install_artifacts = artifacts.has_install_artifacts(target_root)
+    changed_paths = []
+    removed_cleanup_path = artifacts.remove_upgrade_cleanup_artifact(target_root)
+    if removed_cleanup_path:
+        changed_paths.append(removed_cleanup_path)
+        print(f"removed temporary upgrade cleanup workflow from {removed_cleanup_path}")
+
+    if not had_install_artifacts and not clean:
+        print(
+            "\nNo default-branch Backlog Atlas install artifacts were found; "
+            "writing the one-shot cleanup workflow anyway in case generated "
+            "branch artifacts remain."
+        )
+
+    wf_content = artifacts.load_uninstall_workflow_template(clean)
+    if artifacts.write_text_artifact(wf_path, wf_content):
+        changed_paths.append(wf_path)
+        print(f"wrote one-shot uninstall workflow to {wf_path}")
+    else:
+        print(f"one-shot uninstall workflow already exists at {wf_path}")
+
+    if not changed_paths:
+        print("\nNothing to do - Backlog Atlas uninstall workflow is already present.")
         return 0
 
-    wf_content = artifacts.load_uninstall_workflow_template(delete_branch)
-    wf_path.parent.mkdir(parents=True, exist_ok=True)
-    wf_path.write_text(wf_content, encoding="utf-8")
-    print(f"wrote one-shot uninstall workflow to {wf_path}")
-
-    print()
-    print("Next steps:")
-    print(f"  - commit & push the uninstall workflow in {target_root}")
-    print(
-        f"  - the workflow will remove {wf_path.relative_to(target_root)} after it runs"
+    local.add_local_install_files(target_root, changed_paths, vcs)
+    message = (
+        "backlog: clean uninstall Backlog Atlas workflow"
+        if clean
+        else "backlog: uninstall Backlog Atlas workflow"
     )
-    if delete_branch:
-        print(f"  - the workflow will delete the {BACKLOG_BRANCH} branch")
+    local.commit_local_files(target_root, changed_paths, vcs, message)
+    print("created uninstall commit")
+
+    local.print_local_uninstall_next_steps(target_root, vcs)
+    print()
+    print(f"The workflow will remove {wf_path.relative_to(target_root)} after it runs.")
+    if clean:
+        print(
+            f"The workflow will delete the {BACKLOG_BRANCH} branch and "
+            "Backlog Atlas install config"
+        )
     else:
         print(
-            f"  - the workflow will keep the {BACKLOG_BRANCH} branch and log that the hook was uninstalled"
+            "The workflow will remove install manifests and bundled install "
+            f"packages, then keep the {BACKLOG_BRANCH} branch, generated artifacts, "
+            "and config"
         )
     return 0
 
@@ -129,7 +166,10 @@ def add_install_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Print what install would do without writing files or calling GitHub.",
+        help=(
+            "Print what install would do without writing files; remote dry runs "
+            "verify GitHub access."
+        ),
     )
     parser.add_argument(
         "--force",
@@ -150,11 +190,24 @@ def add_uninstall_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--delete-branch",
         action="store_true",
-        help="Have the one-shot uninstall workflow delete the backlog-atlas branch.",
+        help="Deprecated alias for --clean.",
+    )
+    parser.add_argument(
+        "--clean",
+        action="store_true",
+        help=(
+            "Clean uninstall: delete the backlog-atlas branch and Backlog Atlas "
+            "install config."
+        ),
     )
     parser.add_argument(
         "-y",
         "--yes",
         action="store_true",
-        help="Skip confirmation prompt when --delete-branch is used.",
+        help="Skip confirmation prompt when --clean or --delete-branch is used.",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Proceed even when the target working tree is dirty.",
     )

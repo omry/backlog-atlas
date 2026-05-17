@@ -5,7 +5,8 @@ Backlog Atlas on a GitHub repository.
 
 Backlog Atlas creates a dedicated `backlog-atlas` branch containing a static
 dashboard and machine-readable backlog state. Your default branch only gets the
-workflow that keeps that branch updated, plus an install metadata manifest.
+workflow that keeps that branch updated, install metadata, and an install
+manifest used for cleanup.
 
 ## Requirements
 
@@ -56,15 +57,19 @@ This writes:
 
 - `.github/workflows/update-backlog-atlas.yml` — the GitHub Actions workflow
   that updates the `backlog-atlas` branch when issues or pull requests change.
-- `.github/backlog-atlas.json` — an install manifest recording the Backlog
+- `.github/backlog-atlas.json` — install metadata recording the Backlog
   Atlas version, install source, source type, and managed workflow path.
+- `.github/backlog-atlas/manifest.json` — the cleanup manifest listing
+  installed files and whether normal uninstall or only clean uninstall removes
+  them.
 
 Local install requires a clean Git or Sapling working tree. It stages/adds the
-two files and prints the commit and push commands to run next.
+managed install files, creates a local commit containing only those files, and
+prints review and push commands.
 
 Use `--force` to install into a dirty working tree. This skips the cleanliness
 check and rewrites/re-adds the managed install files, but Backlog Atlas still
-only stages/adds its own install files.
+commits only its own install files.
 
 `--target-root` is for local installs only. Do not combine it with `--repo`.
 The checkout's Git or Sapling remote must point at GitHub so Backlog Atlas can
@@ -171,19 +176,34 @@ backlog-atlas uninstall --repo https://github.com/owner/name --target-root /path
 ```
 
 This writes a one-shot workflow to
-`.github/workflows/update-backlog-atlas.yml`. Commit and push it; when it runs,
-it removes the Backlog Atlas workflow and install metadata from the default
-branch.
+`.github/workflows/update-backlog-atlas.yml`, creates a local uninstall commit,
+and prints review and push commands. When the workflow runs, it removes Backlog
+Atlas install hooks and manifests from the default branch.
 
-By default, uninstall keeps the `backlog-atlas` branch so generated history is
-still available. To also delete that branch:
+Uninstall follows Debian-style remove/purge semantics:
+
+- Normal uninstall removes the installed workflow, install metadata/manifest, and
+  bundled install packages from `.backlog-atlas/packages/`.
+- Normal uninstall preserves the `backlog-atlas` branch, generated dashboard
+  history, and Backlog Atlas config.
+- Normal uninstall is idempotent: if default-branch install files were already
+  removed manually, it still writes the one-shot cleanup workflow so generated
+  branch packages can be removed.
+- Clean uninstall also deletes the `backlog-atlas` branch and Backlog Atlas
+  config. It can be run later even if normal uninstall already removed the
+  workflow.
+
+To clean uninstall:
 
 ```sh
 backlog-atlas uninstall \
   --repo https://github.com/owner/name \
   --target-root /path/to/target-repo \
-  --delete-branch
+  --clean
 ```
+
+Like install, uninstall requires a clean working tree by default. `--force`
+skips that check while still committing only Backlog Atlas-owned files.
 
 ## Install Source
 
@@ -238,7 +258,13 @@ backlog-atlas install --repo https://github.com/owner/name --dry-run
 backlog-atlas install --repo https://github.com/owner/name
 ```
 
-This updates the installed workflow and `.github/backlog-atlas.json` so future
-workflow runs use the upgraded Backlog Atlas source. If the generated
-`backlog-atlas` branch already exists, the next workflow run updates its
-machine-generated files in place.
+This updates the installed workflow, `.github/backlog-atlas.json`, and
+`.github/backlog-atlas/manifest.json` so future workflow runs use the upgraded
+Backlog Atlas source and cleanup uses the current install manifest. If the
+generated `backlog-atlas` branch already exists, the next workflow run updates
+its machine-generated files in place.
+
+Install first removes previous Backlog Atlas install hooks/manifests while
+preserving config and generated dashboard history. When the previous install
+manifest lists bundled wheels, it writes a temporary cleanup workflow that
+removes those old wheels only after the new install lands.

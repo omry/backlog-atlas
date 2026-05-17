@@ -1,16 +1,26 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import json
 from typing import Any
 
 from ..errors import UserError
-from .artifacts import build_install_metadata, load_workflow_template
+from .artifacts import (
+    bundled_package_paths_to_cleanup,
+    build_install_metadata,
+    build_install_manifest,
+    manifest_bundled_package_paths,
+    load_upgrade_cleanup_workflow_template,
+    load_workflow_template,
+)
 from .commands import run_gh, try_gh
 from .constants import (
     BACKLOG_BRANCH,
     INSTALL_BRANCH,
+    INSTALL_MANIFEST_RELATIVE_PATH,
     INSTALL_METADATA_RELATIVE_PATH,
+    UPGRADE_CLEANUP_WORKFLOW_RELATIVE_PATH,
     WORKFLOW_RELATIVE_PATH,
 )
 from .models import (
@@ -71,6 +81,27 @@ def github_file_sha(repo: str, branch: str, path: str) -> str | None:
         return None
     data = json.loads(output)
     return data.get("sha")
+
+
+def github_file_text(repo: str, branch: str, path: str) -> str | None:
+    output = try_gh(["api", f"repos/{repo}/contents/{path}?ref={branch}"])
+    if not output:
+        return None
+    data = json.loads(output)
+    if data.get("encoding") != "base64" or not isinstance(data.get("content"), str):
+        return None
+    try:
+        return base64.b64decode(data["content"]).decode()
+    except (binascii.Error, UnicodeDecodeError):
+        return None
+
+
+def remote_installed_bundled_package_paths(repo: str, branch: str) -> list[str]:
+    manifest = github_file_text(repo, branch, INSTALL_MANIFEST_RELATIVE_PATH)
+    if manifest is None:
+        return []
+    package_paths = manifest_bundled_package_paths(manifest)
+    return package_paths or []
 
 
 def put_github_file_bytes(
@@ -140,6 +171,50 @@ def create_branch_ref(repo: str, branch: str, commit_sha: str) -> None:
         ["api", f"repos/{repo}/git/refs", "--method", "POST", "--input", "-"],
         input_text=json.dumps(payload),
     )
+
+
+def delete_github_file(repo: str, branch: str, path: str, message: str) -> bool:
+    sha = github_file_sha(repo, branch, path)
+    if not sha:
+        return False
+    payload = {"message": message, "sha": sha, "branch": branch}
+    run_gh(
+        ["api", f"repos/{repo}/contents/{path}", "--method", "DELETE", "--input", "-"],
+        input_text=json.dumps(payload),
+    )
+    return True
+
+
+def write_or_delete_upgrade_cleanup_workflow(
+    repo: str,
+    branch: str,
+    install_source: InstallSource,
+    message: str,
+    old_bundled_package_paths: list[str] | None = None,
+) -> None:
+    cleanup_package_paths = bundled_package_paths_to_cleanup(
+        install_source,
+        old_bundled_package_paths or [],
+    )
+    if cleanup_package_paths:
+        print(
+            f"Writing upgrade cleanup workflow to {branch}: "
+            f"{UPGRADE_CLEANUP_WORKFLOW_RELATIVE_PATH}"
+        )
+        put_github_file(
+            repo,
+            branch,
+            UPGRADE_CLEANUP_WORKFLOW_RELATIVE_PATH,
+            load_upgrade_cleanup_workflow_template(cleanup_package_paths),
+            message,
+        )
+    elif delete_github_file(
+        repo,
+        branch,
+        UPGRADE_CLEANUP_WORKFLOW_RELATIVE_PATH,
+        "backlog: remove temporary Backlog Atlas upgrade cleanup workflow",
+    ):
+        print(f"Removed old upgrade cleanup workflow from {branch}")
 
 
 def ensure_backlog_branch_with_bundle(repo: str, install_source: InstallSource) -> None:
@@ -260,10 +335,30 @@ def install_remote_workflow(
     print("Resolving default branch")
     default_branch = github_default_branch(repo)
     print(f"Default branch is {default_branch}")
+    old_bundled_package_paths = remote_installed_bundled_package_paths(
+        repo,
+        default_branch,
+    )
+    cleanup_package_paths = bundled_package_paths_to_cleanup(
+        install_source,
+        old_bundled_package_paths,
+    )
     workflow_content = load_workflow_template(install_source.pip_spec)
     metadata_content = build_install_metadata(install_source)
+    include_upgrade_cleanup = bool(cleanup_package_paths)
+    manifest_content = build_install_manifest(
+        install_source,
+        include_upgrade_cleanup=include_upgrade_cleanup,
+    )
     commit_message = install_commit_message(install_source)
     if delivery == "push":
+        if delete_github_file(
+            repo,
+            default_branch,
+            UPGRADE_CLEANUP_WORKFLOW_RELATIVE_PATH,
+            "backlog: remove stale temporary Backlog Atlas upgrade cleanup workflow",
+        ):
+            print(f"Removed stale upgrade cleanup workflow from {default_branch}")
         print(f"Writing workflow to {default_branch}: {WORKFLOW_RELATIVE_PATH}")
         put_github_file(
             repo,
@@ -282,6 +377,24 @@ def install_remote_workflow(
             INSTALL_METADATA_RELATIVE_PATH,
             metadata_content,
             commit_message,
+        )
+        print(
+            f"Writing install manifest to {default_branch}: "
+            f"{INSTALL_MANIFEST_RELATIVE_PATH}"
+        )
+        put_github_file(
+            repo,
+            default_branch,
+            INSTALL_MANIFEST_RELATIVE_PATH,
+            manifest_content,
+            commit_message,
+        )
+        write_or_delete_upgrade_cleanup_workflow(
+            repo,
+            default_branch,
+            install_source,
+            commit_message,
+            old_bundled_package_paths=old_bundled_package_paths,
         )
         return
 
@@ -308,11 +421,33 @@ def install_remote_workflow(
         metadata_content,
         commit_message,
     )
+    print(
+        f"Writing install manifest to {INSTALL_BRANCH}: "
+        f"{INSTALL_MANIFEST_RELATIVE_PATH}"
+    )
+    put_github_file(
+        repo,
+        INSTALL_BRANCH,
+        INSTALL_MANIFEST_RELATIVE_PATH,
+        manifest_content,
+        commit_message,
+    )
+    write_or_delete_upgrade_cleanup_workflow(
+        repo,
+        INSTALL_BRANCH,
+        install_source,
+        commit_message,
+        old_bundled_package_paths=old_bundled_package_paths,
+    )
     ensure_github_pr(repo, INSTALL_BRANCH, default_branch, install_source)
 
 
 def print_remote_install_plan(
-    repo: str, install_source: InstallSource, delivery: str, default_branch: str
+    repo: str,
+    install_source: InstallSource,
+    delivery: str,
+    default_branch: str,
+    cleanup_old_bundled_packages: bool = False,
 ) -> None:
     print("Dry run: would install Backlog Atlas remotely")
     print("Verified GitHub repository exists and current gh auth can write.")
@@ -321,6 +456,7 @@ def print_remote_install_plan(
     print(f"Default branch: {default_branch}")
     print(f"Delivery: {'direct push' if delivery == 'push' else 'pull request'}")
     print(f"Workflow would install Backlog Atlas from: {install_source.pip_spec}")
+    print("Would first remove previous install hooks/manifests if present.")
     if install_source.bundled_wheel_path:
         action = (
             "Would build and upload bundled wheel"
@@ -328,6 +464,11 @@ def print_remote_install_plan(
             else "Would upload bundled wheel"
         )
         print(f"{action} to {BACKLOG_BRANCH}: " f"{install_source.bundled_wheel_path}")
+    if cleanup_old_bundled_packages:
+        print(
+            "Would write a temporary upgrade cleanup workflow that removes old "
+            "bundled wheels after the install lands."
+        )
     if delivery == "push":
         print(f"Would write these files to {default_branch}:")
     else:
@@ -337,6 +478,9 @@ def print_remote_install_plan(
         )
     print(f"  - {WORKFLOW_RELATIVE_PATH}")
     print(f"  - {INSTALL_METADATA_RELATIVE_PATH}")
+    print(f"  - {INSTALL_MANIFEST_RELATIVE_PATH}")
+    if cleanup_old_bundled_packages:
+        print(f"  - {UPGRADE_CLEANUP_WORKFLOW_RELATIVE_PATH}")
     print(
         f"After the install lands, the workflow creates or updates the "
         f"{BACKLOG_BRANCH} branch."
@@ -348,7 +492,16 @@ def run_remote_install(
 ) -> int:
     if dry_run:
         default_branch = verify_remote_install_target(repo)
-        print_remote_install_plan(repo, install_source, delivery, default_branch)
+        cleanup_old_bundled_packages = bool(
+            remote_installed_bundled_package_paths(repo, default_branch)
+        )
+        print_remote_install_plan(
+            repo,
+            install_source,
+            delivery,
+            default_branch,
+            cleanup_old_bundled_packages=cleanup_old_bundled_packages,
+        )
         return 0
 
     install_remote_workflow(repo, install_source, delivery)
