@@ -109,10 +109,13 @@ def print_local_install_next_steps(repo_name: str, target_root: Path, vcs: str) 
     if Path.cwd().resolve() != target_root.resolve():
         print(style(f"cd {target_root}", ANSI_COMMAND, color))
         print()
-    print(style("# Review the install commit.", ANSI_DIM, color))
-    print(style(local_review_command(vcs), ANSI_COMMAND, color))
-    print()
-    print(style("# Push when ready.", ANSI_DIM, color))
+    print(
+        style(
+            f"# Optional: inspect the install commit with {local_review_command(vcs)}.",
+            ANSI_DIM,
+            color,
+        )
+    )
     print(style(local_push_command(vcs, on_default), ANSI_COMMAND, color))
     print()
     if on_default is False:

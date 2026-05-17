@@ -2444,14 +2444,13 @@ def test_install_local_checkout_guides_default_branch_push(
     assert "Checked install workflow and manifest" in out
     assert "created install commit" in out
     assert f"cd {tmp_path}" in out
-    assert "# Review the install commit." in out
-    assert "git show --stat HEAD" in out
-    assert "# Push when ready." in out
+    assert "# Optional: inspect the install commit with git show --stat HEAD." in out
+    assert "# Review the install commit." not in out
+    assert "# Push when ready." not in out
     assert "git push" in out
     assert "git push -u origin HEAD" not in out
     assert "gh workflow run 'Update Backlog Atlas' --repo o/r" in out
     assert "https://github.com/o/r/settings/pages" in out
-    assert "\n# Review the install commit.\n" in out
     assert "\ngit push\n\n# Trigger the first Backlog Atlas run.\n" in out
     assert "\n\n# Enable Pages from the backlog-atlas branch, folder /.\n" in out
 
@@ -2468,7 +2467,7 @@ def test_install_local_checkout_omits_cd_when_already_in_target(
     assert rc == 0
     out = capsys.readouterr().out
     assert f"cd {tmp_path}" not in out
-    assert "# Review the install commit." in out
+    assert "# Optional: inspect the install commit with git show --stat HEAD." in out
 
 
 def test_install_local_checkout_skips_pages_hint_when_pages_is_configured(
@@ -2508,9 +2507,9 @@ def test_install_local_next_steps_are_colorized_when_forced(
     out = capsys.readouterr().out
     assert "\033[" in out
     plain = install_commands.strip_ansi(out)
-    assert "# Review the install commit." in plain
+    assert "# Optional: inspect the install commit with git show --stat HEAD." in plain
     assert "git show --stat HEAD" in plain
-    assert "# Push when ready." in plain
+    assert "# Push when ready." not in plain
 
 
 def test_install_local_checkout_guides_pr_from_non_default_branch(
@@ -2530,7 +2529,7 @@ def test_install_local_checkout_guides_pr_from_non_default_branch(
     assert rc == 0
     out = capsys.readouterr().out
     assert "created install commit" in out
-    assert "git show --stat HEAD" in out
+    assert "# Optional: inspect the install commit with git show --stat HEAD." in out
     assert "git push -u origin HEAD" in out
     assert "# Open or merge a PR for this install commit before continuing." in out
     assert "gh workflow run 'Update Backlog Atlas' --repo o/r" in out
