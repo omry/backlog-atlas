@@ -888,6 +888,7 @@ def test_workflow_template_substitutes_install_source():
     assert 'origin "$BACKLOG_ATLAS_BRANCH"' in out
     assert "backlog-atlas-branch" in out
     assert "favicon.svg" in out
+    assert "badge.svg" in out
     assert "path: backlog-branch" not in out
     assert "cd backlog-branch" not in out
     assert "origin backlog\n" not in out
@@ -901,6 +902,7 @@ def test_web_ui_supports_browser_federated_manifest():
     content = (web_dir / "index.html").read_text(encoding="utf-8")
 
     assert (web_dir / "favicon.svg").exists()
+    assert (web_dir / "badge.svg").exists()
     assert '<link rel="icon" type="image/svg+xml" href="favicon.svg">' in content
     assert 'fetch("atlas.json")' in content
     assert "manifestResponse.status === 404" in content

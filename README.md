@@ -4,6 +4,7 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/backlog-atlas.svg)](https://pypi.org/project/backlog-atlas/)
 [![Publish to PyPI](https://github.com/omry/backlog-atlas/actions/workflows/publish.yml/badge.svg)](https://github.com/omry/backlog-atlas/actions/workflows/publish.yml)
 [![License](https://img.shields.io/pypi/l/backlog-atlas.svg)](https://github.com/omry/backlog-atlas/blob/main/LICENSE)
+[![Backlog Atlas dashboard](backlog_atlas/web/badge.svg)](https://omry.github.io/backlog-atlas/)
 
 Backlog Atlas generates a self-hosted backlog snapshot and static dashboard for
 GitHub repository maintainers.
@@ -12,8 +13,6 @@ It keeps GitHub Issues as the source of truth, derives backlog state from open
 issues and linked pull requests, and publishes the result to a dedicated
 `backlog-atlas` branch. The generated branch is machine-owned and can be served
 directly with GitHub Pages.
-
-This repo's backlog dashboard: <https://omry.github.io/backlog-atlas/>
 
 ![Backlog Atlas dashboard showing backlog summary tables, filters, issue rows, and recent activity.](https://raw.githubusercontent.com/omry/backlog-atlas/main/docs/assets/backlog-atlas-dashboard.png)
 
@@ -40,6 +39,7 @@ The `backlog-atlas` branch contains:
 - `last_snapshot.json` — internal diff state for the next run.
 - `index.html` — the static dashboard.
 - `favicon.svg` — the dashboard icon.
+- `badge.svg` — a README badge image that can link to the hosted dashboard.
 
 The dashboard can also load a generated `atlas.json` manifest next to
 `index.html` and federate multiple public `backlog.json` files in the browser.
@@ -71,6 +71,21 @@ commit that Backlog Atlas creates, then enable GitHub Pages from the
 `backlog-atlas` branch. See the
 [User Guide](https://github.com/omry/backlog-atlas/blob/main/USER-GUIDE.md) for
 the full local and remote install flows.
+
+After the dashboard is hosted, add a Backlog Atlas badge to the repository
+README by wrapping the generated badge image in a link to the dashboard.
+Assuming the generated `badge.svg` is hosted alongside the dashboard, replace
+`DASHBOARD_URL` with the dashboard URL:
+
+```md
+[![Backlog Atlas](DASHBOARD_URL/badge.svg)](DASHBOARD_URL)
+```
+
+For a conventional GitHub Pages dashboard, that is usually:
+
+```md
+[![Backlog Atlas](https://OWNER.github.io/REPO/badge.svg)](https://OWNER.github.io/REPO/)
+```
 
 ## CLI
 

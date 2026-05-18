@@ -119,6 +119,7 @@ The generated branch contains:
 - `last_snapshot.json` — internal diff state for the next run.
 - `index.html` — the static dashboard.
 - `favicon.svg` — the dashboard icon.
+- `badge.svg` — a README badge image that can link to the hosted dashboard.
 - `.backlog-atlas/` — internal state and, for development installs, bundled
   wheels.
 
@@ -137,6 +138,26 @@ Use GitHub Pages to serve the dashboard:
 3. Set the folder to `/`.
 
 The page loads `backlog.json` from the same branch and renders the dashboard.
+
+## Add a README Badge
+
+After the first workflow run publishes the `backlog-atlas` branch, add a badge
+to the repository README. Assuming the generated `badge.svg` is hosted
+alongside the dashboard, replace `DASHBOARD_URL` with the dashboard URL:
+
+```md
+[![Backlog Atlas](DASHBOARD_URL/badge.svg)](DASHBOARD_URL)
+```
+
+For a conventional GitHub Pages dashboard, that is usually:
+
+```md
+[![Backlog Atlas](https://OWNER.github.io/REPO/badge.svg)](https://OWNER.github.io/REPO/)
+```
+
+The image can come from GitHub Pages, a custom static host, or a direct public
+URL for the generated `badge.svg`. The surrounding Markdown link is what makes
+the badge open the hosted backlog dashboard.
 
 ## Run an Update Locally
 
