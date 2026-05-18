@@ -15,6 +15,8 @@ directly with GitHub Pages.
 
 This repo's backlog dashboard: <https://omry.github.io/backlog-atlas/>
 
+![Backlog Atlas dashboard showing backlog summary tables, filters, issue rows, and recent activity.](./docs/assets/backlog-atlas-dashboard.png)
+
 ## Documentation
 
 - [User Guide](./USER-GUIDE.md) — install Backlog Atlas on a repository, enable
@@ -24,7 +26,6 @@ This repo's backlog dashboard: <https://omry.github.io/backlog-atlas/>
 - [Design Note](./DESIGN.md) — how snapshots, diffs, and the update log fit
   together.
 - [Changelog](./CHANGELOG.md) — user-facing release notes.
-- [Standalone TODO](./STANDALONE-TODO.md) — temporary publication checklist.
 
 ## What It Produces
 
