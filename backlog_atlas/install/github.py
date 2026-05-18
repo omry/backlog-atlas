@@ -205,12 +205,6 @@ def put_github_file_bytes(
     )
 
 
-def put_github_file(
-    repo: str, branch: str, path: str, content: str, message: str
-) -> None:
-    put_github_file_bytes(repo, branch, path, content.encode(), message)
-
-
 def create_blob(repo: str, content: bytes) -> str:
     payload = {
         "content": base64.b64encode(content).decode(),
@@ -223,8 +217,13 @@ def create_blob(repo: str, content: bytes) -> str:
     return json.loads(output)["sha"]
 
 
-def create_tree(repo: str, entries: dict[str, bytes]) -> str:
-    tree = []
+def create_tree(
+    repo: str,
+    entries: dict[str, bytes],
+    base_tree_sha: str | None = None,
+    deletions: list[str] | None = None,
+) -> str:
+    tree: list[dict[str, Any]] = []
     for path, content in entries.items():
         tree.append(
             {
@@ -234,17 +233,34 @@ def create_tree(repo: str, entries: dict[str, bytes]) -> str:
                 "sha": create_blob(repo, content),
             }
         )
+    for path in deletions or []:
+        tree.append(
+            {
+                "path": path,
+                "mode": "100644",
+                "type": "blob",
+                "sha": None,
+            }
+        )
+    payload: dict[str, Any] = {"tree": tree}
+    if base_tree_sha:
+        payload["base_tree"] = base_tree_sha
     output = run_gh(
         ["api", f"repos/{repo}/git/trees", "--method", "POST", "--input", "-"],
-        input_text=json.dumps({"tree": tree}),
+        input_text=json.dumps(payload),
     )
     return json.loads(output)["sha"]
 
 
-def create_commit(repo: str, message: str, tree_sha: str) -> str:
+def create_commit(
+    repo: str, message: str, tree_sha: str, parents: list[str] | None = None
+) -> str:
+    payload: dict[str, Any] = {"message": message, "tree": tree_sha}
+    if parents:
+        payload["parents"] = parents
     output = run_gh(
         ["api", f"repos/{repo}/git/commits", "--method", "POST", "--input", "-"],
-        input_text=json.dumps({"message": message, "tree": tree_sha}),
+        input_text=json.dumps(payload),
     )
     return json.loads(output)["sha"]
 
@@ -257,48 +273,64 @@ def create_branch_ref(repo: str, branch: str, commit_sha: str) -> None:
     )
 
 
-def delete_github_file(repo: str, branch: str, path: str, message: str) -> bool:
-    sha = github_file_sha(repo, branch, path)
-    if not sha:
-        return False
-    payload = {"message": message, "sha": sha, "branch": branch}
+def update_branch_ref(
+    repo: str, branch: str, commit_sha: str, force: bool = False
+) -> None:
+    payload: dict[str, object] = {"sha": commit_sha}
+    if force:
+        payload["force"] = True
     run_gh(
-        ["api", f"repos/{repo}/contents/{path}", "--method", "DELETE", "--input", "-"],
+        [
+            "api",
+            f"repos/{repo}/git/refs/heads/{branch}",
+            "--method",
+            "PATCH",
+            "--input",
+            "-",
+        ],
         input_text=json.dumps(payload),
     )
-    return True
 
 
-def write_or_delete_upgrade_cleanup_workflow(
+def github_commit_tree_sha(repo: str, commit_sha: str) -> str:
+    output = run_gh(["api", f"repos/{repo}/git/commits/{commit_sha}"])
+    return json.loads(output)["tree"]["sha"]
+
+
+def commit_github_file_changes(
     repo: str,
     branch: str,
-    install_source: InstallSource,
+    changes: dict[str, bytes | None],
     message: str,
-    old_bundled_package_paths: list[str] | None = None,
-) -> None:
-    cleanup_package_paths = bundled_package_paths_to_cleanup(
-        install_source,
-        old_bundled_package_paths or [],
-    )
-    if cleanup_package_paths:
-        print(
-            f"Writing upgrade cleanup workflow to {branch}: "
-            f"{UPGRADE_CLEANUP_WORKFLOW_RELATIVE_PATH}"
-        )
-        put_github_file(
-            repo,
-            branch,
-            UPGRADE_CLEANUP_WORKFLOW_RELATIVE_PATH,
-            load_upgrade_cleanup_workflow_template(cleanup_package_paths),
-            message,
-        )
-    elif delete_github_file(
+) -> list[str]:
+    head_sha = github_ref_sha(repo, branch)
+    if not head_sha:
+        raise UserError(f"could not resolve {branch} branch for {repo}")
+
+    entries: dict[str, bytes] = {}
+    deletions: list[str] = []
+    for path, content in changes.items():
+        if content is None:
+            if github_file_sha(repo, branch, path):
+                deletions.append(path)
+            continue
+        entries[path] = content
+
+    if not entries and not deletions:
+        return []
+
+    base_tree_sha = github_commit_tree_sha(repo, head_sha)
+    tree_sha = create_tree(
         repo,
-        branch,
-        UPGRADE_CLEANUP_WORKFLOW_RELATIVE_PATH,
-        "backlog: remove temporary Backlog Atlas upgrade cleanup workflow",
-    ):
-        print(f"Removed old upgrade cleanup workflow from {branch}")
+        entries,
+        base_tree_sha=base_tree_sha,
+        deletions=deletions,
+    )
+    if tree_sha == base_tree_sha:
+        return []
+    commit_sha = create_commit(repo, message, tree_sha, parents=[head_sha])
+    update_branch_ref(repo, branch, commit_sha)
+    return [*entries.keys(), *deletions]
 
 
 def ensure_backlog_branch_with_bundle(repo: str, install_source: InstallSource) -> None:
@@ -338,11 +370,12 @@ def ensure_backlog_branch_with_bundle(repo: str, install_source: InstallSource) 
 
 
 def ensure_github_branch(repo: str, branch: str, source_branch: str) -> None:
-    if github_ref_sha(repo, branch):
-        return
     source_sha = github_ref_sha(repo, source_branch)
     if not source_sha:
         raise UserError(f"could not resolve {source_branch} branch for {repo}")
+    if github_ref_sha(repo, branch):
+        update_branch_ref(repo, branch, source_sha, force=True)
+        return
     payload = {"ref": f"refs/heads/{branch}", "sha": source_sha}
     run_gh(
         ["api", f"repos/{repo}/git/refs", "--method", "POST", "--input", "-"],
@@ -411,6 +444,55 @@ def ensure_github_pr(
     )
 
 
+def remote_install_changes(
+    install_source: InstallSource,
+    remote_config_exists: bool,
+    old_bundled_package_paths: list[str],
+) -> tuple[dict[str, bytes | None], bool]:
+    cleanup_package_paths = bundled_package_paths_to_cleanup(
+        install_source,
+        old_bundled_package_paths,
+    )
+    include_upgrade_cleanup = bool(cleanup_package_paths)
+    changes: dict[str, bytes | None] = {
+        WORKFLOW_RELATIVE_PATH: load_workflow_template(
+            install_source.pip_spec
+        ).encode(),
+        INSTALL_METADATA_RELATIVE_PATH: None,
+        INSTALL_MANIFEST_RELATIVE_PATH: build_install_manifest(
+            install_source,
+            include_upgrade_cleanup=include_upgrade_cleanup,
+        ).encode(),
+    }
+    if not remote_config_exists:
+        changes[APP_CONFIG_RELATIVE_PATH] = (
+            app_config.packaged_config_content().encode()
+        )
+    if cleanup_package_paths:
+        changes[UPGRADE_CLEANUP_WORKFLOW_RELATIVE_PATH] = (
+            load_upgrade_cleanup_workflow_template(cleanup_package_paths).encode()
+        )
+    else:
+        changes[UPGRADE_CLEANUP_WORKFLOW_RELATIVE_PATH] = None
+    return changes, include_upgrade_cleanup
+
+
+def print_remote_install_changes(
+    branch: str,
+    changes: dict[str, bytes | None],
+    include_upgrade_cleanup: bool,
+) -> None:
+    print(f"Writing workflow to {branch}: {WORKFLOW_RELATIVE_PATH}")
+    print(f"Writing install manifest to {branch}: {INSTALL_MANIFEST_RELATIVE_PATH}")
+    if APP_CONFIG_RELATIVE_PATH in changes:
+        print(f"Writing editable config to {branch}: {APP_CONFIG_RELATIVE_PATH}")
+    if include_upgrade_cleanup:
+        print(
+            f"Writing upgrade cleanup workflow to {branch}: "
+            f"{UPGRADE_CLEANUP_WORKFLOW_RELATIVE_PATH}"
+        )
+
+
 def install_remote_workflow(
     repo: str, install_source: InstallSource, delivery: str
 ) -> None:
@@ -424,121 +506,53 @@ def install_remote_workflow(
         repo,
         default_branch,
     )
-    cleanup_package_paths = bundled_package_paths_to_cleanup(
+    changes, include_upgrade_cleanup = remote_install_changes(
         install_source,
+        remote_config_exists,
         old_bundled_package_paths,
-    )
-    workflow_content = load_workflow_template(install_source.pip_spec)
-    include_upgrade_cleanup = bool(cleanup_package_paths)
-    manifest_content = build_install_manifest(
-        install_source,
-        include_upgrade_cleanup=include_upgrade_cleanup,
     )
     commit_message = install_commit_message(install_source)
     if delivery == "push":
-        if delete_github_file(
+        print_remote_install_changes(default_branch, changes, include_upgrade_cleanup)
+        changed_paths = commit_github_file_changes(
             repo,
             default_branch,
-            UPGRADE_CLEANUP_WORKFLOW_RELATIVE_PATH,
-            "backlog: remove stale temporary Backlog Atlas upgrade cleanup workflow",
+            changes,
+            commit_message,
+        )
+        if not changed_paths:
+            print(f"Remote install already up to date on {default_branch}")
+            return
+        if INSTALL_METADATA_RELATIVE_PATH in changed_paths:
+            print(f"Removed legacy install metadata from {default_branch}")
+        if (
+            not include_upgrade_cleanup
+            and UPGRADE_CLEANUP_WORKFLOW_RELATIVE_PATH in changed_paths
         ):
             print(f"Removed stale upgrade cleanup workflow from {default_branch}")
-        print(f"Writing workflow to {default_branch}: {WORKFLOW_RELATIVE_PATH}")
-        put_github_file(
-            repo,
-            default_branch,
-            WORKFLOW_RELATIVE_PATH,
-            workflow_content,
-            commit_message,
-        )
-        if delete_github_file(
-            repo,
-            default_branch,
-            INSTALL_METADATA_RELATIVE_PATH,
-            "backlog: remove legacy Backlog Atlas install metadata",
-        ):
-            print(f"Removed legacy install metadata from {default_branch}")
-        print(
-            f"Writing install manifest to {default_branch}: "
-            f"{INSTALL_MANIFEST_RELATIVE_PATH}"
-        )
-        put_github_file(
-            repo,
-            default_branch,
-            INSTALL_MANIFEST_RELATIVE_PATH,
-            manifest_content,
-            commit_message,
-        )
-        if not remote_config_exists:
-            print(
-                f"Writing editable config to {default_branch}: "
-                f"{APP_CONFIG_RELATIVE_PATH}"
-            )
-            put_github_file(
-                repo,
-                default_branch,
-                APP_CONFIG_RELATIVE_PATH,
-                app_config.packaged_config_content(),
-                commit_message,
-            )
-        write_or_delete_upgrade_cleanup_workflow(
-            repo,
-            default_branch,
-            install_source,
-            commit_message,
-            old_bundled_package_paths=old_bundled_package_paths,
-        )
         return
 
     if delivery != "pr":
         raise RuntimeError(f"unsupported delivery mode: {delivery}")
     print(f"Ensuring install branch {INSTALL_BRANCH} from {default_branch}")
     ensure_github_branch(repo, INSTALL_BRANCH, default_branch)
-    print(f"Writing workflow to {INSTALL_BRANCH}: {WORKFLOW_RELATIVE_PATH}")
-    put_github_file(
+    print_remote_install_changes(INSTALL_BRANCH, changes, include_upgrade_cleanup)
+    changed_paths = commit_github_file_changes(
         repo,
         INSTALL_BRANCH,
-        WORKFLOW_RELATIVE_PATH,
-        workflow_content,
+        changes,
         commit_message,
     )
-    if delete_github_file(
-        repo,
-        INSTALL_BRANCH,
-        INSTALL_METADATA_RELATIVE_PATH,
-        "backlog: remove legacy Backlog Atlas install metadata",
-    ):
+    if not changed_paths:
+        print(f"Remote install already up to date on {INSTALL_BRANCH}")
+        return
+    if INSTALL_METADATA_RELATIVE_PATH in changed_paths:
         print(f"Removed legacy install metadata from {INSTALL_BRANCH}")
-    print(
-        f"Writing install manifest to {INSTALL_BRANCH}: "
-        f"{INSTALL_MANIFEST_RELATIVE_PATH}"
-    )
-    put_github_file(
-        repo,
-        INSTALL_BRANCH,
-        INSTALL_MANIFEST_RELATIVE_PATH,
-        manifest_content,
-        commit_message,
-    )
-    if not remote_config_exists:
-        print(
-            f"Writing editable config to {INSTALL_BRANCH}: "
-            f"{APP_CONFIG_RELATIVE_PATH}"
-        )
-        put_github_file(
-            repo,
-            INSTALL_BRANCH,
-            APP_CONFIG_RELATIVE_PATH,
-            app_config.packaged_config_content(),
-            commit_message,
-        )
-    write_or_delete_upgrade_cleanup_workflow(
-        repo,
-        INSTALL_BRANCH,
-        install_source,
-        commit_message,
-        old_bundled_package_paths=old_bundled_package_paths,
-    )
+    if (
+        not include_upgrade_cleanup
+        and UPGRADE_CLEANUP_WORKFLOW_RELATIVE_PATH in changed_paths
+    ):
+        print(f"Removed old upgrade cleanup workflow from {INSTALL_BRANCH}")
     ensure_github_pr(repo, INSTALL_BRANCH, default_branch, install_source)
 
 

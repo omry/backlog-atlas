@@ -3148,10 +3148,6 @@ def test_install_remote_pr_writes_workflow_and_manifest(
 ):
     calls: list[tuple[Any, ...]] = []
 
-    def fake_delete_file(repo: str, branch: str, path: str, message: str) -> bool:
-        calls.append(("delete", repo, branch, path, message))
-        return True
-
     monkeypatch.setattr(install_github, "github_default_branch", lambda repo: "develop")
     monkeypatch.setattr(
         install_github,
@@ -3161,14 +3157,21 @@ def test_install_remote_pr_writes_workflow_and_manifest(
         ),
     )
 
-    def fake_put(repo: str, branch: str, path: str, content: str, message: str) -> None:
-        calls.append(("put", repo, branch, path, content, message))
+    def fake_commit_changes(
+        repo: str, branch: str, changes: dict[str, bytes | None], message: str
+    ) -> list[str]:
+        calls.append(("commit-changes", repo, branch, changes, message))
+        return [
+            path
+            for path, content in changes.items()
+            if content is not None
+            or path == ".github/workflows/temporary-backlog-atlas-upgrade-cleanup.yml"
+        ]
 
-    monkeypatch.setattr(install_github, "put_github_file", fake_put)
     monkeypatch.setattr(
         install_github,
-        "delete_github_file",
-        fake_delete_file,
+        "commit_github_file_changes",
+        fake_commit_changes,
     )
     monkeypatch.setattr(
         install_github,
@@ -3218,20 +3221,25 @@ def test_install_remote_pr_writes_workflow_and_manifest(
         "temporary_backlog_atlas_install_pr",
         "develop",
     )
-    assert calls[5] == (
-        "delete",
+    commit_call = calls[1]
+    assert commit_call[:3] == (
+        "commit-changes",
         "o/r",
         "temporary_backlog_atlas_install_pr",
-        ".github/workflows/temporary-backlog-atlas-upgrade-cleanup.yml",
-        "backlog: remove temporary Backlog Atlas upgrade cleanup workflow",
     )
-    put_calls = [call for call in calls if call[0] == "put"]
-    assert [call[3] for call in put_calls] == [
+    changes = commit_call[3]
+    assert list(changes) == [
         ".github/workflows/update-backlog-atlas.yml",
+        ".github/backlog-atlas.json",
         ".github/backlog-atlas/manifest.json",
         ".github/backlog-atlas/config.yaml",
+        ".github/workflows/temporary-backlog-atlas-upgrade-cleanup.yml",
     ]
-    manifest = json.loads(put_calls[1][4])
+    assert changes[".github/backlog-atlas.json"] is None
+    assert (
+        changes[".github/workflows/temporary-backlog-atlas-upgrade-cleanup.yml"] is None
+    )
+    manifest = json.loads(changes[".github/backlog-atlas/manifest.json"].decode())
     assert manifest["tool"] == "backlog-atlas"
     assert manifest["install"]["installed_version"] == "1.2.3"
     assert manifest["install"]["install_source"] == "backlog-atlas==1.2.3"
@@ -3239,11 +3247,10 @@ def test_install_remote_pr_writes_workflow_and_manifest(
     assert ".github/backlog-atlas/manifest.json" in {
         entry["path"] for entry in manifest["files"]
     }
-    assert "ref: ${{ github.event.repository.default_branch }}" in put_calls[0][4]
-    assert "ref: main" not in put_calls[0][4]
-    assert put_calls[0][5] == "backlog: install Backlog Atlas 1.2.3 workflow"
-    assert put_calls[1][5] == "backlog: install Backlog Atlas 1.2.3 workflow"
-    assert put_calls[2][5] == "backlog: install Backlog Atlas 1.2.3 workflow"
+    workflow = changes[".github/workflows/update-backlog-atlas.yml"].decode()
+    assert "ref: ${{ github.event.repository.default_branch }}" in workflow
+    assert "ref: main" not in workflow
+    assert commit_call[4] == "backlog: install Backlog Atlas 1.2.3 workflow"
     assert calls[-1][:4] == (
         "pr",
         "o/r",
@@ -3278,13 +3285,17 @@ def test_install_remote_pr_skips_upgrade_cleanup_for_fresh_bundled_wheel(
             ("branch", repo, branch, source_branch)
         ),
     )
-    monkeypatch.setattr(install_github, "delete_github_file", lambda *args: False)
+
+    def fake_commit_changes(
+        repo: str, branch: str, changes: dict[str, bytes | None], message: str
+    ) -> list[str]:
+        calls.append(("commit-changes", repo, branch, changes, message))
+        return [path for path, content in changes.items() if content is not None]
+
     monkeypatch.setattr(
         install_github,
-        "put_github_file",
-        lambda repo, branch, path, content, message: calls.append(
-            ("put", repo, branch, path, content, message)
-        ),
+        "commit_github_file_changes",
+        fake_commit_changes,
     )
     monkeypatch.setattr(
         install_github,
@@ -3306,12 +3317,17 @@ def test_install_remote_pr_skips_upgrade_cleanup_for_fresh_bundled_wheel(
 
     install_github.install_remote_workflow("o/r", source, "pr")
 
-    put_calls = [call for call in calls if call[0] == "put"]
-    assert [call[3] for call in put_calls] == [
+    commit_call = [call for call in calls if call[0] == "commit-changes"][0]
+    changes = commit_call[3]
+    assert [path for path, content in changes.items() if content is not None] == [
         ".github/workflows/update-backlog-atlas.yml",
         ".github/backlog-atlas/manifest.json",
     ]
-    manifest = json.loads(put_calls[1][4])
+    assert changes[".github/backlog-atlas.json"] is None
+    assert (
+        changes[".github/workflows/temporary-backlog-atlas-upgrade-cleanup.yml"] is None
+    )
+    manifest = json.loads(changes[".github/backlog-atlas/manifest.json"].decode())
     assert {
         "path": ".backlog-atlas/packages/current.whl",
         "branch": "backlog-atlas",
@@ -3343,13 +3359,17 @@ def test_install_remote_pr_writes_cleanup_when_previous_install_was_bundled(
             ("branch", repo, branch, source_branch)
         ),
     )
-    monkeypatch.setattr(install_github, "delete_github_file", lambda *args: False)
+
+    def fake_commit_changes(
+        repo: str, branch: str, changes: dict[str, bytes | None], message: str
+    ) -> list[str]:
+        calls.append(("commit-changes", repo, branch, changes, message))
+        return [path for path, content in changes.items() if content is not None]
+
     monkeypatch.setattr(
         install_github,
-        "put_github_file",
-        lambda repo, branch, path, content, message: calls.append(
-            ("put", repo, branch, path, content, message)
-        ),
+        "commit_github_file_changes",
+        fake_commit_changes,
     )
     monkeypatch.setattr(
         install_github,
@@ -3371,17 +3391,20 @@ def test_install_remote_pr_writes_cleanup_when_previous_install_was_bundled(
 
     install_github.install_remote_workflow("o/r", source, "pr")
 
-    put_calls = [call for call in calls if call[0] == "put"]
-    assert [call[3] for call in put_calls] == [
+    commit_call = [call for call in calls if call[0] == "commit-changes"][0]
+    changes = commit_call[3]
+    assert [path for path, content in changes.items() if content is not None] == [
         ".github/workflows/update-backlog-atlas.yml",
         ".github/backlog-atlas/manifest.json",
         ".github/workflows/temporary-backlog-atlas-upgrade-cleanup.yml",
     ]
-    manifest = json.loads(put_calls[1][4])
+    manifest = json.loads(changes[".github/backlog-atlas/manifest.json"].decode())
     assert not [
         entry for entry in manifest["files"] if entry.get("branch") == "backlog-atlas"
     ]
-    cleanup_content = put_calls[2][4]
+    cleanup_content = changes[
+        ".github/workflows/temporary-backlog-atlas-upgrade-cleanup.yml"
+    ].decode()
     assert "BACKLOG_ATLAS_KEEP_PACKAGE" not in cleanup_content
     assert ".backlog-atlas/packages/old.whl" in cleanup_content
     assert "find .backlog-atlas/packages" not in cleanup_content
@@ -3405,13 +3428,17 @@ def test_install_remote_push_skips_upgrade_cleanup_without_old_packages(
         "ensure_backlog_branch_with_bundle",
         lambda repo, install_source: calls.append(("bundle", repo, install_source)),
     )
-    monkeypatch.setattr(install_github, "delete_github_file", lambda *args: False)
+
+    def fake_commit_changes(
+        repo: str, branch: str, changes: dict[str, bytes | None], message: str
+    ) -> list[str]:
+        calls.append(("commit-changes", repo, branch, changes, message))
+        return [path for path, content in changes.items() if content is not None]
+
     monkeypatch.setattr(
         install_github,
-        "put_github_file",
-        lambda repo, branch, path, content, message: calls.append(
-            ("put", repo, branch, path, content, message)
-        ),
+        "commit_github_file_changes",
+        fake_commit_changes,
     )
     monkeypatch.setattr(
         install_github,
@@ -3426,14 +3453,15 @@ def test_install_remote_push_skips_upgrade_cleanup_without_old_packages(
 
     install_github.install_remote_workflow("o/r", source, "push")
 
-    put_calls = [call for call in calls if call[0] == "put"]
-    assert [call[3] for call in put_calls] == [
+    commit_call = [call for call in calls if call[0] == "commit-changes"][0]
+    changes = commit_call[3]
+    assert [path for path, content in changes.items() if content is not None] == [
         ".github/workflows/update-backlog-atlas.yml",
         ".github/backlog-atlas/manifest.json",
     ]
 
 
-def test_install_remote_push_removes_stale_cleanup_before_updating_workflow(
+def test_install_remote_push_removes_stale_cleanup_in_install_commit(
     monkeypatch: pytest.MonkeyPatch,
 ):
     calls: list[tuple[Any, ...]] = []
@@ -3445,21 +3473,21 @@ def test_install_remote_push_removes_stale_cleanup_before_updating_workflow(
         bundled_wheel_content=b"wheel bytes",
     )
 
-    def fake_delete(repo: str, branch: str, path: str, message: str) -> bool:
-        calls.append(("delete", repo, branch, path, message))
-        return path == ".github/workflows/temporary-backlog-atlas-upgrade-cleanup.yml"
-
     monkeypatch.setattr(install_github, "github_default_branch", lambda repo: "main")
     monkeypatch.setattr(
         install_github, "ensure_backlog_branch_with_bundle", lambda *args: None
     )
-    monkeypatch.setattr(install_github, "delete_github_file", fake_delete)
+
+    def fake_commit_changes(
+        repo: str, branch: str, changes: dict[str, bytes | None], message: str
+    ) -> list[str]:
+        calls.append(("commit-changes", repo, branch, changes, message))
+        return list(changes)
+
     monkeypatch.setattr(
         install_github,
-        "put_github_file",
-        lambda repo, branch, path, content, message: calls.append(
-            ("put", repo, branch, path, content, message)
-        ),
+        "commit_github_file_changes",
+        fake_commit_changes,
     )
     monkeypatch.setattr(
         install_github,
@@ -3474,18 +3502,208 @@ def test_install_remote_push_removes_stale_cleanup_before_updating_workflow(
 
     install_github.install_remote_workflow("o/r", source, "push")
 
-    assert calls[0] == (
-        "delete",
-        "o/r",
-        "main",
-        ".github/workflows/temporary-backlog-atlas-upgrade-cleanup.yml",
-        "backlog: remove stale temporary Backlog Atlas upgrade cleanup workflow",
-    )
-    put_calls = [call for call in calls if call[0] == "put"]
-    assert [call[3] for call in put_calls][:3] == [
+    commit_call = calls[0]
+    assert commit_call[:3] == ("commit-changes", "o/r", "main")
+    changes = commit_call[3]
+    assert [path for path, content in changes.items() if content is not None] == [
         ".github/workflows/update-backlog-atlas.yml",
         ".github/backlog-atlas/manifest.json",
     ]
+    assert (
+        changes[".github/workflows/temporary-backlog-atlas-upgrade-cleanup.yml"] is None
+    )
+
+
+def test_commit_github_file_changes_batches_writes_and_deletes(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    calls: list[tuple[Any, ...]] = []
+
+    monkeypatch.setattr(install_github, "github_ref_sha", lambda repo, branch: "head")
+    monkeypatch.setattr(
+        install_github, "github_commit_tree_sha", lambda repo, commit_sha: "base-tree"
+    )
+    monkeypatch.setattr(
+        install_github,
+        "github_file_sha",
+        lambda repo, branch, path: "old-sha" if path == "old.txt" else None,
+    )
+
+    def fake_create_tree(
+        repo: str,
+        entries: dict[str, bytes],
+        base_tree_sha: str | None = None,
+        deletions: list[str] | None = None,
+    ) -> str:
+        calls.append(("tree", repo, entries, base_tree_sha, deletions))
+        return "new-tree"
+
+    def fake_create_commit(
+        repo: str,
+        message: str,
+        tree_sha: str,
+        parents: list[str] | None = None,
+    ) -> str:
+        calls.append(("commit", repo, message, tree_sha, parents))
+        return "new-commit"
+
+    monkeypatch.setattr(install_github, "create_tree", fake_create_tree)
+    monkeypatch.setattr(install_github, "create_commit", fake_create_commit)
+    monkeypatch.setattr(
+        install_github,
+        "update_branch_ref",
+        lambda repo, branch, commit_sha: calls.append(
+            ("ref", repo, branch, commit_sha)
+        ),
+    )
+
+    changed_paths = install_github.commit_github_file_changes(
+        "o/r",
+        "install-branch",
+        {"new.txt": b"new", "old.txt": None, "missing.txt": None},
+        "install message",
+    )
+
+    assert changed_paths == ["new.txt", "old.txt"]
+    assert calls == [
+        ("tree", "o/r", {"new.txt": b"new"}, "base-tree", ["old.txt"]),
+        ("commit", "o/r", "install message", "new-tree", ["head"]),
+        ("ref", "o/r", "install-branch", "new-commit"),
+    ]
+
+
+def test_commit_github_file_changes_skips_commit_when_tree_is_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    calls: list[tuple[Any, ...]] = []
+
+    monkeypatch.setattr(install_github, "github_ref_sha", lambda repo, branch: "head")
+    monkeypatch.setattr(
+        install_github, "github_commit_tree_sha", lambda repo, commit_sha: "base-tree"
+    )
+    monkeypatch.setattr(install_github, "github_file_sha", lambda *args: None)
+
+    def fake_create_tree(
+        repo: str,
+        entries: dict[str, bytes],
+        base_tree_sha: str | None = None,
+        deletions: list[str] | None = None,
+    ) -> str:
+        calls.append(("tree", repo, entries, base_tree_sha, deletions))
+        return "base-tree"
+
+    monkeypatch.setattr(
+        install_github,
+        "create_tree",
+        fake_create_tree,
+    )
+    monkeypatch.setattr(
+        install_github,
+        "create_commit",
+        lambda *args, **kwargs: pytest.fail("should not create unchanged commit"),
+    )
+    monkeypatch.setattr(
+        install_github,
+        "update_branch_ref",
+        lambda *args, **kwargs: pytest.fail("should not update unchanged branch"),
+    )
+
+    changed_paths = install_github.commit_github_file_changes(
+        "o/r",
+        "install-branch",
+        {"same.txt": b"same"},
+        "install message",
+    )
+
+    assert changed_paths == []
+    assert calls == [("tree", "o/r", {"same.txt": b"same"}, "base-tree", [])]
+
+
+def test_install_remote_pr_skips_pr_when_install_is_unchanged(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    calls: list[tuple[Any, ...]] = []
+    source = InstallSource(
+        pip_spec="backlog-atlas==2.0.0",
+        version="2.0.0",
+        source_type="pypi",
+    )
+
+    monkeypatch.setattr(install_github, "github_default_branch", lambda repo: "main")
+    monkeypatch.setattr(
+        install_github,
+        "ensure_github_branch",
+        lambda repo, branch, source_branch: calls.append(
+            ("branch", repo, branch, source_branch)
+        ),
+    )
+
+    def fake_commit_changes(
+        repo: str, branch: str, changes: dict[str, bytes | None], message: str
+    ) -> list[str]:
+        calls.append(("commit-changes", repo, branch, changes, message))
+        return []
+
+    monkeypatch.setattr(
+        install_github,
+        "commit_github_file_changes",
+        fake_commit_changes,
+    )
+    monkeypatch.setattr(
+        install_github,
+        "ensure_github_pr",
+        lambda *args: pytest.fail("should not open a zero-diff install PR"),
+    )
+    monkeypatch.setattr(
+        install_github,
+        "remote_installed_bundled_package_paths",
+        lambda repo, branch: [],
+    )
+    monkeypatch.setattr(
+        install_github,
+        "validate_remote_config",
+        lambda repo, branch: True,
+    )
+
+    install_github.install_remote_workflow("o/r", source, "pr")
+
+    out = capsys.readouterr().out
+    assert (
+        "Remote install already up to date on temporary_backlog_atlas_install_pr" in out
+    )
+    assert calls[0] == ("branch", "o/r", "temporary_backlog_atlas_install_pr", "main")
+    assert calls[1][:3] == (
+        "commit-changes",
+        "o/r",
+        "temporary_backlog_atlas_install_pr",
+    )
+
+
+def test_ensure_github_branch_resets_existing_branch_to_source(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    calls: list[tuple[Any, ...]] = []
+
+    def fake_ref(repo: str, branch: str) -> str | None:
+        return {"main": "main-sha", "install-branch": "old-install-sha"}.get(branch)
+
+    monkeypatch.setattr(install_github, "github_ref_sha", fake_ref)
+    monkeypatch.setattr(
+        install_github,
+        "update_branch_ref",
+        lambda repo, branch, commit_sha, force=False: calls.append(
+            ("update", repo, branch, commit_sha, force)
+        ),
+    )
+    monkeypatch.setattr(
+        install_github,
+        "run_gh",
+        lambda args, input_text=None: pytest.fail("should not create existing branch"),
+    )
+
+    install_github.ensure_github_branch("o/r", "install-branch", "main")
+
+    assert calls == [("update", "o/r", "install-branch", "main-sha", True)]
 
 
 def test_upgrade_cleanup_template_keeps_current_wheel_and_self_deletes():
