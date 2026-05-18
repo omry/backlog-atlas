@@ -5,7 +5,7 @@ Keep entries user-facing and grouped by released version.
 
 ## Unreleased
 
-- Nothing yet.
+- Improved PyPI-facing project links and refreshed public documentation.
 
 ## 0.15
 

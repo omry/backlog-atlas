@@ -131,11 +131,11 @@ for the managed experience.
 
 ## Near-term roadmap
 
-1. Harden the single-repository OSS publisher workflow and documentation.
-2. Stabilize the generated JSON schema.
-3. Document how to self-host the single-repository dashboard.
-4. Add a manually configured static multi-repository dashboard for related
-   public repositories such as OmegaConf and Hydra.
+1. Stabilize the generated JSON schema and document compatibility expectations.
+2. Improve install, upgrade, and uninstall ergonomics for public repositories.
+3. Harden the browser-federated multi-repository dashboard with clearer
+   diagnostics and examples.
+4. Add lightweight operational guidance for keeping generated dashboards fresh.
 5. Keep the schema and terminology ready for a future multi-repository hosted
    dashboard.
 

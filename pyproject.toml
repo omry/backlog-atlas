@@ -23,6 +23,14 @@ dependencies = [
     "omegaconf>=2.3",
 ]
 
+[project.urls]
+Homepage = "https://github.com/omry/backlog-atlas"
+Documentation = "https://github.com/omry/backlog-atlas/blob/main/USER-GUIDE.md"
+Source = "https://github.com/omry/backlog-atlas"
+Issues = "https://github.com/omry/backlog-atlas/issues"
+Changelog = "https://github.com/omry/backlog-atlas/blob/main/CHANGELOG.md"
+Dashboard = "https://omry.github.io/backlog-atlas/"
+
 [project.optional-dependencies]
 dev = [
     "black>=24",

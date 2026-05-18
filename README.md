@@ -3,7 +3,7 @@
 [![PyPI](https://img.shields.io/pypi/v/backlog-atlas.svg)](https://pypi.org/project/backlog-atlas/)
 [![Python versions](https://img.shields.io/pypi/pyversions/backlog-atlas.svg)](https://pypi.org/project/backlog-atlas/)
 [![Publish to PyPI](https://github.com/omry/backlog-atlas/actions/workflows/publish.yml/badge.svg)](https://github.com/omry/backlog-atlas/actions/workflows/publish.yml)
-[![License](https://img.shields.io/pypi/l/backlog-atlas.svg)](./LICENSE)
+[![License](https://img.shields.io/pypi/l/backlog-atlas.svg)](https://github.com/omry/backlog-atlas/blob/main/LICENSE)
 
 Backlog Atlas generates a self-hosted backlog snapshot and static dashboard for
 GitHub repository maintainers.
@@ -15,17 +15,20 @@ directly with GitHub Pages.
 
 This repo's backlog dashboard: <https://omry.github.io/backlog-atlas/>
 
-![Backlog Atlas dashboard showing backlog summary tables, filters, issue rows, and recent activity.](./docs/assets/backlog-atlas-dashboard.png)
+![Backlog Atlas dashboard showing backlog summary tables, filters, issue rows, and recent activity.](https://raw.githubusercontent.com/omry/backlog-atlas/main/docs/assets/backlog-atlas-dashboard.png)
 
 ## Documentation
 
-- [User Guide](./USER-GUIDE.md) — install Backlog Atlas on a repository, enable
-  the web UI, run updates, and uninstall.
-- [Maintainer Guide](./MAINTAINERS.md) — local development, testing, packaging,
-  and release prep for this package.
-- [Design Note](./DESIGN.md) — how snapshots, diffs, and the update log fit
+- [User Guide](https://github.com/omry/backlog-atlas/blob/main/USER-GUIDE.md)
+  — install Backlog Atlas on a repository, enable the web UI, run updates, and
+  uninstall.
+- [Maintainer Guide](https://github.com/omry/backlog-atlas/blob/main/MAINTAINERS.md)
+  — local development, testing, packaging, and release prep for this package.
+- [Design Note](https://github.com/omry/backlog-atlas/blob/main/DESIGN.md)
+  — how snapshots, diffs, and the update log fit
   together.
-- [Changelog](./CHANGELOG.md) — user-facing release notes.
+- [Changelog](https://github.com/omry/backlog-atlas/blob/main/CHANGELOG.md)
+  — user-facing release notes.
 
 ## What It Produces
 
@@ -64,8 +67,9 @@ removes those old wheels only after the new install lands.
 The manifest is the cleanup source of truth: it records installed files and
 which ones are removed only by clean uninstall. Review and push the install
 commit that Backlog Atlas creates, then enable GitHub Pages from the
-`backlog-atlas` branch. See the [User Guide](./USER-GUIDE.md) for the full
-local and remote install flows.
+`backlog-atlas` branch. See the
+[User Guide](https://github.com/omry/backlog-atlas/blob/main/USER-GUIDE.md) for
+the full local and remote install flows.
 
 ## CLI
 
@@ -108,7 +112,9 @@ python -m mypy
 python -m pytest
 ```
 
-See the [Maintainer Guide](./MAINTAINERS.md) for the full development workflow.
+See the
+[Maintainer Guide](https://github.com/omry/backlog-atlas/blob/main/MAINTAINERS.md)
+for the full development workflow.
 
 ## License
 

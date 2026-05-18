@@ -62,8 +62,8 @@ Run the full available test suite before considering a change ready:
 python -m pytest
 ```
 
-The full suite currently collects the same test file, but keep running both
-commands so the habit stays correct as the repo grows.
+The full suite includes the focused update tests plus supporting tests for
+release tooling. Run it before considering a change ready.
 
 ## GitHub CLI Mocking in Tests
 
