@@ -129,18 +129,14 @@ def status_entries() -> list[tuple[str, str]]:
     return entries
 
 
-def ensure_no_unrelated_changes(allowed_paths: set[str]) -> None:
-    unrelated = [
-        f"{state} {path}"
-        for state, path in status_entries()
-        if path not in allowed_paths
-    ]
-    if unrelated:
-        formatted = "\n".join(f"  {entry}" for entry in unrelated)
+def ensure_clean_working_tree() -> None:
+    entries = [f"{state} {path}" for state, path in status_entries()]
+    if entries:
+        formatted = "\n".join(f"  {entry}" for entry in entries)
         raise ReleaseError(
-            "working tree has changes outside release files:\n"
+            "working tree has uncommitted changes:\n"
             f"{formatted}\n"
-            "commit or shelve unrelated changes first"
+            "commit, shelve, or revert them before publishing"
         )
 
 
@@ -148,6 +144,40 @@ def release_files_changed() -> bool:
     return any(
         path in {"CHANGELOG.md", "pyproject.toml"} for _state, path in status_entries()
     )
+
+
+def release_file_snapshot() -> dict[Path, str]:
+    return {
+        PYPROJECT: PYPROJECT.read_text(encoding="utf-8"),
+        CHANGELOG: CHANGELOG.read_text(encoding="utf-8"),
+    }
+
+
+def restore_release_files(snapshot: dict[Path, str]) -> None:
+    for path, content in snapshot.items():
+        path.write_text(content, encoding="utf-8")
+
+
+def ensure_default_branch_current() -> None:
+    run(["sl", "pull"])
+    missing = run(
+        [
+            "sl",
+            "log",
+            "-r",
+            "interestingmaster() % .",
+            "--template",
+            "{node|short} {desc}\\n",
+        ],
+        capture=True,
+    ).strip()
+    if missing:
+        first = missing.splitlines()[0]
+        raise ReleaseError(
+            "local checkout is missing commits from the remote default branch; "
+            "update/rebase before publishing\n"
+            f"latest missing commit: {first}"
+        )
 
 
 def confirm(version: str) -> None:
@@ -240,30 +270,36 @@ def main() -> int:
         require_tool("sl")
         require_tool("gh")
 
+        ensure_clean_working_tree()
+        ensure_default_branch_current()
+
         if not args.yes:
             confirm(target)
 
-        ensure_no_unrelated_changes({"CHANGELOG.md", "pyproject.toml"})
-
+        snapshot = release_file_snapshot()
         if target != current:
             set_pyproject_version(target)
-        notes, changelog_changed = update_changelog_for_release(target)
+        try:
+            notes, changelog_changed = update_changelog_for_release(target)
 
-        run(
-            [
-                sys.executable,
-                "-m",
-                "black",
-                "--check",
-                "backlog_atlas",
-                "tests",
-                "tools",
-            ]
-        )
-        run([sys.executable, "-m", "pyflakes", "backlog_atlas", "tests", "tools"])
-        run([sys.executable, "-m", "mypy"])
-        run([sys.executable, "-m", "pytest"])
-        run([sys.executable, "-m", "build", "--wheel", "--sdist"])
+            run(
+                [
+                    sys.executable,
+                    "-m",
+                    "black",
+                    "--check",
+                    "backlog_atlas",
+                    "tests",
+                    "tools",
+                ]
+            )
+            run([sys.executable, "-m", "pyflakes", "backlog_atlas", "tests", "tools"])
+            run([sys.executable, "-m", "mypy"])
+            run([sys.executable, "-m", "pytest"])
+            run([sys.executable, "-m", "build", "--wheel", "--sdist"])
+        except Exception:
+            restore_release_files(snapshot)
+            raise
 
         if changelog_changed or release_files_changed():
             run(["sl", "add", "pyproject.toml", "CHANGELOG.md"])
