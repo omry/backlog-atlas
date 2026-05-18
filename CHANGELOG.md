@@ -5,6 +5,10 @@ Keep entries user-facing and grouped by released version.
 
 ## Unreleased
 
+- Nothing yet.
+
+## 0.17
+
 - Added a generated Backlog Atlas README badge image for linking to hosted
   dashboards.
 
