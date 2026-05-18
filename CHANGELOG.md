@@ -7,6 +7,8 @@ Keep entries user-facing and grouped by released version.
 
 - Batched remote install updates into a single commit, so install pull requests
   no longer show one commit per generated file.
+- Added `backlog-atlas atlas install` to batch install or upgrade every repo in
+  an atlas config, with all-target preflight validation before writes.
 - Required remote installs to pass `--delivery pr` or `--delivery push`
   explicitly instead of defaulting to pull request delivery.
 - Skipped creating remote install commits or pull requests when the generated

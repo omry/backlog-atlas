@@ -85,6 +85,8 @@ backlog-atlas dump-atlas --config atlas.yaml --output PATH
 backlog-atlas atlas list
 backlog-atlas atlas add owner/name [--backlog-url URL]
 backlog-atlas atlas remove owner/name
+backlog-atlas atlas install --delivery pr|push
+backlog-atlas atlas install --local --checkout-root PATH
 
 # refresh backlog data; normally run by the installed GitHub Action
 backlog-atlas update [flags]

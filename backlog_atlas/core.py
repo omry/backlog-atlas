@@ -16,6 +16,11 @@ from omegaconf.errors import OmegaConfBaseException
 
 from . import config as app_config
 from .errors import UserError
+from .install import artifacts as install_artifacts
+from .install import github as install_github
+from .install import local as install_local
+from .install import repo as install_repo
+from .install import sources as install_sources
 from .install.cli import (
     add_install_args,
     add_uninstall_args,
@@ -24,6 +29,7 @@ from .install.cli import (
 )
 from .install.commands import read_text, run_gh
 from .install.constants import ATLAS_CONFIG_RELATIVE_PATH, BACKLOG_BRANCH
+from .install.models import InstallSource
 from .install.repo import detect_target_root, normalize_github_repo, resolve_repo
 
 PROJECT_DIR = Path(__file__).resolve().parent
@@ -44,6 +50,22 @@ STATUS_ORDER = ["in progress", "community PR", "blocked", "not started", "done"]
 class CategoryClassification:
     category: str
     reason: str
+
+
+@dataclass
+class AtlasRemoteInstallTarget:
+    repo: str
+    default_branch: str
+    remote_config_exists: bool
+    cleanup_old_bundled_packages: bool
+
+
+@dataclass
+class AtlasLocalInstallTarget:
+    repo: str
+    target_root: Path
+    vcs: str
+    cleanup_old_bundled_packages: bool
 
 
 def split_repo(repo: str) -> tuple[str, str]:
@@ -1072,6 +1094,77 @@ def _add_atlas_args(parser: argparse.ArgumentParser) -> None:
     )
     _add_atlas_config_arg(p_remove)
 
+    p_install = sub.add_parser(
+        "install",
+        help="Install or upgrade Backlog Atlas for every repo tracked by atlas.yaml.",
+    )
+    _add_atlas_config_arg(p_install)
+    p_install.add_argument(
+        "--delivery",
+        choices=["pr", "push"],
+        help="Remote batch mode: create install PRs or push to default branches.",
+    )
+    p_install.add_argument(
+        "--local",
+        action="store_true",
+        help="Local batch mode: install into local checkouts instead of GitHub.",
+    )
+    p_install.add_argument(
+        "--checkout-root",
+        help=(
+            "Root containing local checkouts for --local mode. Defaults to cwd; "
+            "repos are resolved as CHECKOUT_ROOT/repo-name unless --checkout is used."
+        ),
+    )
+    p_install.add_argument(
+        "--checkout",
+        action="append",
+        default=[],
+        metavar="OWNER/REPO=PATH",
+        help="Explicit checkout path for one atlas repo. May be repeated.",
+    )
+    p_install.add_argument(
+        "--only",
+        action="append",
+        default=[],
+        metavar="OWNER/REPO",
+        help="Install only this atlas repo. May be repeated.",
+    )
+    p_install.add_argument(
+        "--exclude",
+        action="append",
+        default=[],
+        metavar="OWNER/REPO",
+        help="Skip this atlas repo. May be repeated.",
+    )
+    p_install.add_argument(
+        "--install-from",
+        help=(
+            "Same meaning as top-level install: pinned backlog-atlas==X.Y.Z "
+            "or a local Backlog Atlas checkout path."
+        ),
+    )
+    p_install.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate every target and print the batch plan without writing.",
+    )
+    p_install.add_argument(
+        "--force",
+        action="store_true",
+        help="For --local, proceed even when target checkouts are dirty or behind.",
+    )
+    p_install.add_argument(
+        "--yes",
+        action="store_true",
+        help="Skip the confirmation prompt for batch --delivery push.",
+    )
+    p_install.add_argument(
+        "--continue-on-error",
+        action="store_true",
+        help="Try remaining repos after an install fails; exit nonzero if any fail.",
+    )
+
 
 def remote_config_source(repo: str, branch: str) -> str:
     return f"https://github.com/{repo}@{branch}:{app_config.APP_CONFIG_RELATIVE_PATH}"
@@ -1469,6 +1562,407 @@ def run_atlas_remove(args: argparse.Namespace) -> int:
     return 0
 
 
+def normalized_atlas_repos(path: Path) -> list[str]:
+    manifest = load_atlas_manifest_config(path)
+    repos = []
+    seen: set[str] = set()
+    for entry in manifest["repos"]:
+        repo = normalize_atlas_repo_arg(entry["repo"])
+        if repo in seen:
+            raise atlas_config_error(path, f"{repo} is listed more than once")
+        seen.add(repo)
+        repos.append(repo)
+    return repos
+
+
+def atlas_repo_filter(values: list[str], flag_name: str) -> set[str]:
+    repos = set()
+    for value in values:
+        try:
+            repos.add(normalize_atlas_repo_arg(value))
+        except UserError as e:
+            raise UserError(f"invalid {flag_name} repo {value!r}: {e}") from e
+    return repos
+
+
+def filter_atlas_install_repos(args: argparse.Namespace, repos: list[str]) -> list[str]:
+    only = atlas_repo_filter(args.only, "--only")
+    exclude = atlas_repo_filter(args.exclude, "--exclude")
+    available = set(repos)
+    unknown = sorted((only | exclude) - available)
+    if unknown:
+        raise UserError(
+            "atlas install filter refers to repo(s) not tracked in atlas.yaml: "
+            + ", ".join(unknown)
+        )
+    selected = [repo for repo in repos if (not only or repo in only)]
+    selected = [repo for repo in selected if repo not in exclude]
+    if not selected:
+        raise UserError("atlas install has no repos to process after filters")
+    return selected
+
+
+def parse_checkout_mappings(values: list[str]) -> dict[str, Path]:
+    mappings = {}
+    for value in values:
+        if "=" not in value:
+            raise UserError(
+                "--checkout must be formatted as OWNER/REPO=/path/to/checkout"
+            )
+        repo_text, path_text = value.split("=", 1)
+        repo = normalize_atlas_repo_arg(repo_text)
+        if not path_text.strip():
+            raise UserError(
+                "--checkout must be formatted as OWNER/REPO=/path/to/checkout"
+            )
+        mappings[repo] = Path(path_text).expanduser()
+    return mappings
+
+
+def default_checkout_path(repo: str, checkout_root: Path) -> Path:
+    candidate = checkout_root / repo.split("/", 1)[1]
+    if candidate.exists():
+        return candidate
+    try:
+        if install_repo.resolve_repo(None, checkout_root) == repo:
+            return checkout_root
+    except UserError:
+        pass
+    return candidate
+
+
+def format_preflight_errors(errors: list[tuple[str, str]]) -> str:
+    lines = ["atlas install preflight failed; no repos were written:"]
+    for repo, message in errors:
+        lines.append(f"  - {repo}: {message}")
+    return "\n".join(lines)
+
+
+def preflight_atlas_remote_install(
+    repos: list[str], install_source: InstallSource
+) -> list[AtlasRemoteInstallTarget]:
+    targets = []
+    errors = []
+    for repo_name in repos:
+        try:
+            default_branch = install_github.verify_remote_install_target(repo_name)
+            remote_config_exists = install_github.validate_remote_config(
+                repo_name,
+                default_branch,
+            )
+            old_packages = install_github.remote_installed_bundled_package_paths(
+                repo_name,
+                default_branch,
+            )
+            cleanup_old_bundled_packages = bool(
+                install_artifacts.bundled_package_paths_to_cleanup(
+                    install_source,
+                    old_packages,
+                )
+            )
+            targets.append(
+                AtlasRemoteInstallTarget(
+                    repo=repo_name,
+                    default_branch=default_branch,
+                    remote_config_exists=remote_config_exists,
+                    cleanup_old_bundled_packages=cleanup_old_bundled_packages,
+                )
+            )
+        except UserError as e:
+            errors.append((repo_name, str(e)))
+    if errors:
+        raise UserError(format_preflight_errors(errors))
+    return targets
+
+
+def preflight_atlas_local_install(
+    repos: list[str],
+    install_source: InstallSource,
+    checkout_root: Path,
+    checkout_mappings: dict[str, Path],
+    dry_run: bool,
+    force: bool,
+) -> list[AtlasLocalInstallTarget]:
+    targets = []
+    errors = []
+    for repo_name in repos:
+        target_root = checkout_mappings.get(
+            repo_name,
+            default_checkout_path(repo_name, checkout_root),
+        ).resolve()
+        try:
+            vcs = install_repo.detect_local_vcs(target_root)
+            detected_repo = install_repo.resolve_repo(None, target_root)
+            if detected_repo != repo_name:
+                errors.append(
+                    (
+                        repo_name,
+                        f"checkout {target_root} points at {detected_repo}",
+                    )
+                )
+                continue
+            config_path = install_artifacts.find_app_config_target(target_root)
+            if config_path.exists():
+                app_config.validate_config_file(config_path)
+            if install_source.bundled_wheel_path:
+                install_github.verify_remote_install_target(repo_name)
+            if not dry_run and not force:
+                if install_local.ensure_worktree_clean(target_root, vcs) is False:
+                    errors.append((repo_name, f"{target_root} is not clean"))
+                    continue
+                if (
+                    install_local.ensure_default_branch_current(target_root, vcs)
+                    is False
+                ):
+                    errors.append(
+                        (repo_name, f"{target_root} is missing default branch commits")
+                    )
+                    continue
+            old_packages = install_artifacts.installed_bundled_package_paths(
+                target_root
+            )
+            cleanup_old_bundled_packages = bool(
+                install_artifacts.bundled_package_paths_to_cleanup(
+                    install_source,
+                    old_packages,
+                )
+            )
+            targets.append(
+                AtlasLocalInstallTarget(
+                    repo=repo_name,
+                    target_root=target_root,
+                    vcs=vcs,
+                    cleanup_old_bundled_packages=cleanup_old_bundled_packages,
+                )
+            )
+        except UserError as e:
+            errors.append((repo_name, str(e)))
+    if errors:
+        raise UserError(format_preflight_errors(errors))
+    return targets
+
+
+def print_atlas_remote_install_plan(
+    path: Path,
+    targets: list[AtlasRemoteInstallTarget],
+    install_source: InstallSource,
+    delivery: str,
+    dry_run: bool,
+) -> None:
+    print("Batch remote Backlog Atlas install")
+    print(f"Atlas config: {path}")
+    print(f"Delivery: {'direct push' if delivery == 'push' else 'pull request'}")
+    print(f"Install source: {install_source.pip_spec}")
+    print("Repos:")
+    for target in targets:
+        suffix = []
+        if not target.remote_config_exists:
+            suffix.append("create config")
+        if target.cleanup_old_bundled_packages:
+            suffix.append("cleanup old bundled wheels")
+        detail = f" ({', '.join(suffix)})" if suffix else ""
+        print(f"  - {target.repo} [{target.default_branch}]{detail}")
+    if dry_run:
+        print("Dry run: no branches, commits, or pull requests will be created.")
+    elif delivery == "push":
+        print("This will push install commits directly to each repo's default branch.")
+    else:
+        print("This will create or update one install pull request per repo.")
+
+
+def print_atlas_local_install_plan(
+    path: Path,
+    targets: list[AtlasLocalInstallTarget],
+    install_source: InstallSource,
+    checkout_root: Path,
+    dry_run: bool,
+    force: bool,
+) -> None:
+    print("Batch local Backlog Atlas install")
+    print(f"Atlas config: {path}")
+    print(f"Checkout root: {checkout_root}")
+    print(f"Install source: {install_source.pip_spec}")
+    if force:
+        print("Working tree freshness checks are skipped because --force was provided.")
+    print("Repos:")
+    for target in targets:
+        detail = (
+            " (cleanup old bundled wheels)"
+            if target.cleanup_old_bundled_packages
+            else ""
+        )
+        print(f"  - {target.repo}: {target.target_root} [{target.vcs}]{detail}")
+    if dry_run:
+        print("Dry run: no files or commits will be created.")
+    else:
+        print("This will create local install commits in each checkout.")
+
+
+def confirm_batch_push(yes: bool) -> bool:
+    if yes:
+        return True
+    try:
+        answer = input("\nProceed? [y/N] ").strip().lower()
+    except EOFError:
+        answer = ""
+    if answer in {"y", "yes"}:
+        return True
+    print("Aborted.")
+    return False
+
+
+def print_atlas_install_results(
+    succeeded: list[str],
+    failed: list[tuple[str, str]],
+    skipped: list[str],
+) -> None:
+    print("\nBatch install summary:")
+    print(f"  succeeded: {len(succeeded)}")
+    print(f"  failed: {len(failed)}")
+    if skipped:
+        print(f"  not attempted: {len(skipped)}")
+    if failed:
+        print("\nFailures:", file=sys.stderr)
+        for repo_name, message in failed:
+            print(f"  - {repo_name}: {message}", file=sys.stderr)
+    if skipped:
+        print("\nNot attempted:", file=sys.stderr)
+        for repo_name in skipped:
+            print(f"  - {repo_name}", file=sys.stderr)
+
+
+def apply_atlas_remote_install(
+    targets: list[AtlasRemoteInstallTarget],
+    install_source: InstallSource,
+    delivery: str,
+    continue_on_error: bool,
+) -> int:
+    succeeded: list[str] = []
+    failed: list[tuple[str, str]] = []
+    skipped: list[str] = []
+    for index, target in enumerate(targets, start=1):
+        print(f"\n[{index}/{len(targets)}] Installing {target.repo}")
+        try:
+            install_github.install_remote_workflow(
+                target.repo,
+                install_source,
+                delivery,
+            )
+            succeeded.append(target.repo)
+        except UserError as e:
+            failed.append((target.repo, str(e)))
+            if not continue_on_error:
+                skipped = [remaining.repo for remaining in targets[index:]]
+                break
+    print_atlas_install_results(succeeded, failed, skipped)
+    return 1 if failed else 0
+
+
+def apply_atlas_local_install(
+    targets: list[AtlasLocalInstallTarget],
+    install_source: InstallSource,
+    force: bool,
+    continue_on_error: bool,
+) -> int:
+    succeeded: list[str] = []
+    failed: list[tuple[str, str]] = []
+    skipped: list[str] = []
+    for index, target in enumerate(targets, start=1):
+        print(f"\n[{index}/{len(targets)}] Installing {target.repo}")
+        try:
+            rc = install_local.run_local_install(
+                target.repo,
+                target.target_root,
+                install_source,
+                dry_run=False,
+                force=force,
+            )
+            if rc == 0:
+                succeeded.append(target.repo)
+                continue
+            failed.append((target.repo, f"install exited with status {rc}"))
+        except UserError as e:
+            failed.append((target.repo, str(e)))
+        if not continue_on_error:
+            skipped = [remaining.repo for remaining in targets[index:]]
+            break
+    print_atlas_install_results(succeeded, failed, skipped)
+    return 1 if failed else 0
+
+
+def validate_atlas_install_args(args: argparse.Namespace) -> None:
+    if args.local and args.delivery:
+        raise UserError("choose either --local or --delivery, not both")
+    if not args.local and not args.delivery:
+        raise UserError(
+            "atlas install requires --local or an explicit --delivery pr|push"
+        )
+    if not args.local:
+        if args.checkout_root or args.checkout:
+            raise UserError("--checkout-root and --checkout only apply with --local")
+        if args.force:
+            raise UserError("--force only applies with --local")
+    if args.yes and args.delivery != "push":
+        raise UserError("--yes only applies to atlas install --delivery push")
+
+
+def run_atlas_install(args: argparse.Namespace) -> int:
+    validate_atlas_install_args(args)
+    path = atlas_config_path(args.config)
+    repos = filter_atlas_install_repos(args, normalized_atlas_repos(path))
+    install_source = install_sources.resolve_install_source(
+        args.install_from,
+        dry_run=args.dry_run,
+    )
+
+    if args.local:
+        checkout_root = Path(args.checkout_root or ".").expanduser().resolve()
+        checkout_mappings = parse_checkout_mappings(args.checkout)
+        local_targets = preflight_atlas_local_install(
+            repos,
+            install_source,
+            checkout_root,
+            checkout_mappings,
+            dry_run=args.dry_run,
+            force=args.force,
+        )
+        print_atlas_local_install_plan(
+            path,
+            local_targets,
+            install_source,
+            checkout_root,
+            dry_run=args.dry_run,
+            force=args.force,
+        )
+        if args.dry_run:
+            return 0
+        return apply_atlas_local_install(
+            local_targets,
+            install_source,
+            force=args.force,
+            continue_on_error=args.continue_on_error,
+        )
+
+    remote_targets = preflight_atlas_remote_install(repos, install_source)
+    print_atlas_remote_install_plan(
+        path,
+        remote_targets,
+        install_source,
+        args.delivery,
+        dry_run=args.dry_run,
+    )
+    if args.dry_run:
+        return 0
+    if args.delivery == "push" and not confirm_batch_push(args.yes):
+        return 1
+    return apply_atlas_remote_install(
+        remote_targets,
+        install_source,
+        args.delivery,
+        continue_on_error=args.continue_on_error,
+    )
+
+
 def run_atlas(args: argparse.Namespace) -> int:
     if args.atlas_cmd == "list":
         return run_atlas_list(args)
@@ -1476,6 +1970,8 @@ def run_atlas(args: argparse.Namespace) -> int:
         return run_atlas_add(args)
     if args.atlas_cmd == "remove":
         return run_atlas_remove(args)
+    if args.atlas_cmd == "install":
+        return run_atlas_install(args)
     raise RuntimeError(f"unsupported atlas command: {args.atlas_cmd}")
 
 

@@ -1189,6 +1189,332 @@ def test_atlas_cli_add_rejects_repo_without_backlog_atlas_install(
     assert "does not appear to have Backlog Atlas installed" in capsys.readouterr().err
 
 
+def test_atlas_install_requires_mode(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+):
+    config = tmp_path / "atlas.yaml"
+    config.write_text(
+        "repos:\n"
+        "- repo: o/one\n"
+        "  backlog_url: https://example.com/one/backlog.json\n",
+        encoding="utf-8",
+    )
+    sys.argv = [
+        "backlog-atlas",
+        "atlas",
+        "install",
+        "--config",
+        str(config),
+    ]
+
+    assert ub.main() == 1
+
+    assert "requires --local or an explicit --delivery" in capsys.readouterr().err
+
+
+def test_atlas_install_remote_preflights_all_repos_before_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    config = tmp_path / "atlas.yaml"
+    config.write_text(
+        "repos:\n"
+        "- repo: o/one\n"
+        "  backlog_url: https://example.com/one/backlog.json\n"
+        "- repo: o/two\n"
+        "  backlog_url: https://example.com/two/backlog.json\n",
+        encoding="utf-8",
+    )
+    events: list[tuple[str, str]] = []
+    _stub_installed_pypi(monkeypatch)
+
+    def fake_verify(repo: str) -> str:
+        events.append(("verify", repo))
+        if repo == "o/two":
+            raise install_github.UserError("no write access")
+        return "main"
+
+    def fake_validate_config(repo: str, branch: str) -> bool:
+        events.append(("config", repo))
+        return False
+
+    def fake_remote_packages(repo: str, branch: str) -> list[str]:
+        events.append(("packages", repo))
+        return []
+
+    monkeypatch.setattr(install_github, "verify_remote_install_target", fake_verify)
+    monkeypatch.setattr(
+        install_github,
+        "validate_remote_config",
+        fake_validate_config,
+    )
+    monkeypatch.setattr(
+        install_github,
+        "remote_installed_bundled_package_paths",
+        fake_remote_packages,
+    )
+    monkeypatch.setattr(
+        install_github,
+        "install_remote_workflow",
+        lambda *args: pytest.fail("should not write when preflight fails"),
+    )
+    sys.argv = [
+        "backlog-atlas",
+        "atlas",
+        "install",
+        "--delivery",
+        "pr",
+        "--config",
+        str(config),
+    ]
+
+    assert ub.main() == 1
+
+    assert events == [
+        ("verify", "o/one"),
+        ("config", "o/one"),
+        ("packages", "o/one"),
+        ("verify", "o/two"),
+    ]
+    err = capsys.readouterr().err
+    assert "preflight failed; no repos were written" in err
+    assert "o/two: no write access" in err
+
+
+def test_atlas_install_remote_pr_writes_after_all_preflight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    config = tmp_path / "atlas.yaml"
+    config.write_text(
+        "repos:\n"
+        "- repo: o/one\n"
+        "  backlog_url: https://example.com/one/backlog.json\n"
+        "- repo: o/two\n"
+        "  backlog_url: https://example.com/two/backlog.json\n",
+        encoding="utf-8",
+    )
+    events: list[tuple[str, str]] = []
+    _stub_installed_pypi(monkeypatch)
+
+    def fake_verify(repo: str) -> str:
+        events.append(("verify", repo))
+        return "main"
+
+    def fake_validate_config(repo: str, branch: str) -> bool:
+        events.append(("config", repo))
+        return False
+
+    def fake_remote_packages(repo: str, branch: str) -> list[str]:
+        events.append(("packages", repo))
+        return []
+
+    def fake_install(repo: str, source: InstallSource, delivery: str) -> None:
+        events.append(("install", repo))
+
+    monkeypatch.setattr(
+        install_github,
+        "verify_remote_install_target",
+        fake_verify,
+    )
+    monkeypatch.setattr(
+        install_github,
+        "validate_remote_config",
+        fake_validate_config,
+    )
+    monkeypatch.setattr(
+        install_github,
+        "remote_installed_bundled_package_paths",
+        fake_remote_packages,
+    )
+    monkeypatch.setattr(
+        install_github,
+        "install_remote_workflow",
+        fake_install,
+    )
+    sys.argv = [
+        "backlog-atlas",
+        "atlas",
+        "install",
+        "--delivery",
+        "pr",
+        "--config",
+        str(config),
+    ]
+
+    assert ub.main() == 0
+
+    assert events == [
+        ("verify", "o/one"),
+        ("config", "o/one"),
+        ("packages", "o/one"),
+        ("verify", "o/two"),
+        ("config", "o/two"),
+        ("packages", "o/two"),
+        ("install", "o/one"),
+        ("install", "o/two"),
+    ]
+
+
+def test_atlas_install_push_prompts_before_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    config = tmp_path / "atlas.yaml"
+    config.write_text(
+        "repos:\n"
+        "- repo: o/one\n"
+        "  backlog_url: https://example.com/one/backlog.json\n",
+        encoding="utf-8",
+    )
+    prompts: list[str] = []
+    _stub_installed_pypi(monkeypatch)
+    monkeypatch.setattr(
+        install_github, "verify_remote_install_target", lambda repo: "main"
+    )
+    monkeypatch.setattr(
+        install_github, "validate_remote_config", lambda repo, branch: False
+    )
+    monkeypatch.setattr(
+        install_github,
+        "remote_installed_bundled_package_paths",
+        lambda repo, branch: [],
+    )
+    monkeypatch.setattr(
+        install_github,
+        "install_remote_workflow",
+        lambda *args: pytest.fail("should not write when user declines"),
+    )
+
+    def fake_input(prompt: str) -> str:
+        prompts.append(prompt)
+        return "n"
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    sys.argv = [
+        "backlog-atlas",
+        "atlas",
+        "install",
+        "--delivery",
+        "push",
+        "--config",
+        str(config),
+    ]
+
+    assert ub.main() == 1
+
+    assert prompts == ["\nProceed? [y/N] "]
+    assert "Aborted." in capsys.readouterr().out
+
+
+def test_atlas_install_local_preflights_all_checkouts_before_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    config = tmp_path / "atlas.yaml"
+    config.write_text(
+        "repos:\n"
+        "- repo: o/one\n"
+        "  backlog_url: https://example.com/one/backlog.json\n"
+        "- repo: o/two\n"
+        "  backlog_url: https://example.com/two/backlog.json\n",
+        encoding="utf-8",
+    )
+    checkout_root = tmp_path / "checkouts"
+    one = checkout_root / "one"
+    two = checkout_root / "two"
+    one.mkdir(parents=True)
+    two.mkdir(parents=True)
+    clean_calls: list[Path] = []
+    _stub_installed_pypi(monkeypatch)
+    monkeypatch.setattr(install_repo, "detect_local_vcs", lambda target_root: "git")
+    monkeypatch.setattr(
+        install_repo,
+        "resolve_repo",
+        lambda explicit_repo, cwd=None: {
+            one: "o/one",
+            two: "o/two",
+        }[Path(cwd).resolve()],
+    )
+
+    def fake_clean(target_root: Path, vcs: str) -> bool:
+        clean_calls.append(target_root)
+        return target_root != two
+
+    monkeypatch.setattr(install_local, "ensure_worktree_clean", fake_clean)
+    monkeypatch.setattr(
+        install_local, "ensure_default_branch_current", lambda target_root, vcs: True
+    )
+    monkeypatch.setattr(
+        install_local,
+        "run_local_install",
+        lambda *args, **kwargs: pytest.fail("should not write when preflight fails"),
+    )
+    sys.argv = [
+        "backlog-atlas",
+        "atlas",
+        "install",
+        "--local",
+        "--checkout-root",
+        str(checkout_root),
+        "--config",
+        str(config),
+    ]
+
+    assert ub.main() == 1
+
+    assert clean_calls == [one.resolve(), two.resolve()]
+    err = capsys.readouterr().err
+    assert "preflight failed; no repos were written" in err
+    assert "o/two" in err
+
+
+def test_atlas_install_local_dry_run_uses_checkout_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    config = tmp_path / "atlas.yaml"
+    config.write_text(
+        "repos:\n"
+        "- repo: o/one\n"
+        "  backlog_url: https://example.com/one/backlog.json\n",
+        encoding="utf-8",
+    )
+    checkout_root = tmp_path / "checkouts"
+    one = checkout_root / "one"
+    one.mkdir(parents=True)
+    _stub_installed_pypi(monkeypatch)
+    monkeypatch.setattr(install_repo, "detect_local_vcs", lambda target_root: "git")
+    monkeypatch.setattr(
+        install_repo,
+        "resolve_repo",
+        lambda explicit_repo, cwd=None: "o/one",
+    )
+    monkeypatch.setattr(
+        install_local,
+        "ensure_worktree_clean",
+        lambda *args: pytest.fail("dry-run should not require clean checkouts"),
+    )
+    monkeypatch.setattr(
+        install_local,
+        "run_local_install",
+        lambda *args, **kwargs: pytest.fail("dry-run should not write"),
+    )
+    sys.argv = [
+        "backlog-atlas",
+        "atlas",
+        "install",
+        "--local",
+        "--checkout-root",
+        str(checkout_root),
+        "--config",
+        str(config),
+        "--dry-run",
+    ]
+
+    assert ub.main() == 0
+
+    out = capsys.readouterr().out
+    assert "Batch local Backlog Atlas install" in out
+    assert f"o/one: {one.resolve()}" in out
+    assert "Dry run: no files or commits will be created." in out
+
+
 def test_verify_backlog_atlas_installed_checks_repo_and_manifest(
     monkeypatch: pytest.MonkeyPatch,
 ):

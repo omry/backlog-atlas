@@ -210,6 +210,33 @@ backlog-atlas atlas list
 backlog-atlas atlas remove facebookresearch/hydra
 ```
 
+To install or upgrade every repo listed in `atlas.yaml`, run a batch install:
+
+```sh
+backlog-atlas atlas install --delivery pr --dry-run
+backlog-atlas atlas install --delivery pr
+```
+
+Use `--delivery push` to push install commits directly to each repo's default
+branch. Batch push validates write access and config for every target repo
+before writing anything, then asks for confirmation unless `--yes` is passed.
+
+```sh
+backlog-atlas atlas install --delivery push
+```
+
+For local checkouts, point the batch at a directory containing checkouts named
+after each repository, or pass explicit checkout mappings:
+
+```sh
+backlog-atlas atlas install --local --checkout-root ~/dev --dry-run
+backlog-atlas atlas install --local --checkout omry/omegaconf=~/src/omegaconf
+```
+
+Batch install supports `--only`, `--exclude`, `--install-from`,
+`--continue-on-error`, and local `--force`. Without `--continue-on-error`, it
+stops on the first install failure and reports which repos were not attempted.
+
 Without `--backlog-url`, `atlas add` defaults to
 `https://raw.githubusercontent.com/OWNER/REPO/backlog-atlas/backlog.json`, which
 is readable by browsers from other GitHub Pages sites. `atlas add` validates
