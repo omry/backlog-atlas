@@ -868,6 +868,7 @@ def test_workflow_template_substitutes_install_source():
     assert 'pip install "$BACKLOG_ATLAS_PIP"' in out
     assert "backlog-atlas update" in out
     assert "backlog-atlas dump-web" in out
+    assert "backlog-atlas dump-web --output backlog-atlas-branch" in out
     assert "backlog-atlas dump-atlas" in out
     assert "ensure-backlog-branch:" in out
     assert "needs: ensure-backlog-branch" in out
@@ -886,6 +887,7 @@ def test_workflow_template_substitutes_install_source():
     assert "ref: main" not in out
     assert 'origin "$BACKLOG_ATLAS_BRANCH"' in out
     assert "backlog-atlas-branch" in out
+    assert "favicon.svg" in out
     assert "path: backlog-branch" not in out
     assert "cd backlog-branch" not in out
     assert "origin backlog\n" not in out
@@ -895,10 +897,11 @@ def test_workflow_template_substitutes_install_source():
 
 
 def test_web_ui_supports_browser_federated_manifest():
-    content = (
-        Path(__file__).resolve().parent.parent / "backlog_atlas" / "web" / "index.html"
-    ).read_text(encoding="utf-8")
+    web_dir = Path(__file__).resolve().parent.parent / "backlog_atlas" / "web"
+    content = (web_dir / "index.html").read_text(encoding="utf-8")
 
+    assert (web_dir / "favicon.svg").exists()
+    assert '<link rel="icon" type="image/svg+xml" href="favicon.svg">' in content
     assert 'fetch("atlas.json")' in content
     assert "manifestResponse.status === 404" in content
     assert "Could not load Backlog Atlas data" in content

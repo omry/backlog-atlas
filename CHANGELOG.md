@@ -5,6 +5,7 @@ Keep entries user-facing and grouped by released version.
 
 ## Unreleased
 
+- Added the Backlog Atlas logo as the generated dashboard favicon.
 - Improved PyPI-facing project links and refreshed public documentation.
 
 ## 0.15

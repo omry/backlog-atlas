@@ -39,6 +39,7 @@ The `backlog-atlas` branch contains:
 - `updates.jsonl` — append-only structured activity history.
 - `last_snapshot.json` — internal diff state for the next run.
 - `index.html` — the static dashboard.
+- `favicon.svg` — the dashboard icon.
 
 The dashboard can also load a generated `atlas.json` manifest next to
 `index.html` and federate multiple public `backlog.json` files in the browser.
