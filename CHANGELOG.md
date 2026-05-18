@@ -5,6 +5,10 @@ Keep entries user-facing and grouped by released version.
 
 ## Unreleased
 
+- Nothing yet.
+
+## 0.15
+
 - Hardened release publishing so it requires a clean checkout, checks the
   remote default branch before editing release files, and restores release
   files if pre-commit checks fail.
