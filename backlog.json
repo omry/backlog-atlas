@@ -1,9 +1,9 @@
 {
-  "generated_on": "2026-05-17",
-  "generated_at": "2026-05-17T20:34:34Z",
+  "generated_on": "2026-05-18",
+  "generated_at": "2026-05-18T09:01:08Z",
   "repo": "omry/backlog-atlas",
   "summary": {
-    "open_total": 2,
+    "open_total": 1,
     "by_category": [
       {
         "category": "Bug",
@@ -14,7 +14,7 @@
       {
         "category": "Enhancement",
         "emoji": "✨",
-        "count": 2,
+        "count": 1,
         "percentage": 100.0
       },
       {
@@ -61,31 +61,16 @@
       {
         "status": "not started",
         "emoji": "⬜",
-        "count": 2
+        "count": 1
       },
       {
         "status": "done",
         "emoji": "✅",
-        "count": 0
+        "count": 1
       }
     ]
   },
   "issues": [
-    {
-      "number": 1,
-      "title": "Dogfood Backlog Atlas install on this repo",
-      "category": "Enhancement",
-      "category_emoji": "✨",
-      "status": "not started",
-      "status_emoji": "⬜",
-      "prs": [],
-      "created": "2026-05-16",
-      "updated": "2026-05-16",
-      "labels": [
-        "enhancement"
-      ],
-      "url": "https://github.com/omry/backlog-atlas/issues/1"
-    },
     {
       "number": 2,
       "title": "Explore reusable GitHub Actions package-manager lifecycle",
@@ -100,9 +85,31 @@
         "help wanted"
       ],
       "url": "https://github.com/omry/backlog-atlas/issues/2"
+    },
+    {
+      "number": 1,
+      "title": "Dogfood Backlog Atlas install on this repo",
+      "category": "Enhancement",
+      "category_emoji": "✨",
+      "status": "done",
+      "status_emoji": "✅",
+      "prs": [],
+      "created": "2026-05-16",
+      "updated": "2026-05-16",
+      "labels": [
+        "enhancement"
+      ],
+      "url": "https://github.com/omry/backlog-atlas/issues/1"
     }
   ],
   "updates": [
+    {
+      "ts": "2026-05-18T09:01:08Z",
+      "kind": "closed",
+      "issue": 1,
+      "issue_url": "https://github.com/omry/backlog-atlas/issues/1",
+      "title": "Dogfood Backlog Atlas install on this repo"
+    },
     {
       "ts": "2026-05-17T07:13:30Z",
       "kind": "new",
