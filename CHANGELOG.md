@@ -5,7 +5,12 @@ Keep entries user-facing and grouped by released version.
 
 ## Unreleased
 
-- Nothing yet.
+- Batched remote install updates into a single commit, so install pull requests
+  no longer show one commit per generated file.
+- Required remote installs to pass `--delivery pr` or `--delivery push`
+  explicitly instead of defaulting to pull request delivery.
+- Skipped creating remote install commits or pull requests when the generated
+  install files are already up to date.
 
 ## 0.13
 

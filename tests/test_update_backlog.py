@@ -1292,6 +1292,7 @@ def test_install_help_prefers_repository_url(capsys: pytest.CaptureFixture[str])
     assert "cannot be combined with --target-root" in normalized
     assert "Target working tree root for local install" in normalized
     assert "Cannot be combined with --repo" in normalized
+    assert "Required for remote installs" in normalized
     assert "proceed even when the target working tree is dirty" in normalized
     assert "Print install progress and next-step commands" in normalized
     assert "GitHub repo owner/name" not in normalized
@@ -1326,6 +1327,8 @@ def test_install_rejects_unsupported_repo_value(
         "install",
         "--repo",
         "https://example.com/o/r",
+        "--delivery",
+        "pr",
     ]
 
     rc = ub.main()
@@ -1335,6 +1338,29 @@ def test_install_rejects_unsupported_repo_value(
     assert "unsupported --repo value" in err
     assert "https://github.com/owner/name" in err
     assert "owner/name" in err
+
+
+def test_install_remote_requires_delivery_choice(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    monkeypatch.setattr(
+        install_sources,
+        "resolve_install_source",
+        lambda *args, **kwargs: pytest.fail("should reject before resolving source"),
+    )
+    sys.argv = [
+        "backlog-atlas",
+        "install",
+        "--repo",
+        "https://github.com/o/r",
+    ]
+
+    rc = ub.main()
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "--delivery is required for remote installs with --repo" in err
+    assert "choose --delivery pr or --delivery push" in err
 
 
 def test_install_writes_workflow_when_missing(
@@ -2471,6 +2497,8 @@ def test_install_rejects_floating_install_source(
         "install",
         "--repo",
         "o/r",
+        "--delivery",
+        "pr",
         "--install-from",
         "git+https://example.com/x.git@main",
     ]
@@ -2708,7 +2736,7 @@ def test_install_local_checkout_guides_pr_from_non_default_branch(
     assert "gh run list --repo o/r --workflow=update-backlog-atlas.yml" in out
 
 
-def test_install_remote_defaults_to_pr_delivery_for_github_url(
+def test_install_remote_supports_pr_delivery_for_github_url(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ):
     captured: dict[str, str] = {}
@@ -2735,6 +2763,8 @@ def test_install_remote_defaults_to_pr_delivery_for_github_url(
         "https://github.com/o/r.git",
         "--install-from",
         "backlog-atlas==2.0.0",
+        "--delivery",
+        "pr",
         "--verbose",
     ]
     rc = ub.main()
@@ -2835,6 +2865,8 @@ def test_install_remote_dry_run_verifies_repo_without_writing(
         "install",
         "--repo",
         "https://github.com/o/r",
+        "--delivery",
+        "pr",
         "--dry-run",
     ]
 
@@ -2894,6 +2926,8 @@ def test_install_remote_dry_run_rejects_missing_write_access(
         "install",
         "--repo",
         "https://github.com/o/r",
+        "--delivery",
+        "pr",
         "--dry-run",
     ]
 
@@ -2939,6 +2973,8 @@ def test_install_remote_dry_run_explains_missing_repo(
         "install",
         "--repo",
         "https://github.com/owner/name",
+        "--delivery",
+        "pr",
         "--dry-run",
     ]
 
@@ -3075,6 +3111,8 @@ def test_install_remote_dry_run_local_source_does_not_build_wheel(
         "install",
         "--repo",
         "https://github.com/o/r",
+        "--delivery",
+        "pr",
         "--install-from",
         str(source_root),
         "--dry-run",
@@ -3123,6 +3161,8 @@ def test_install_remote_bundles_local_source(
         "install",
         "--repo",
         "https://github.com/o/r.git",
+        "--delivery",
+        "pr",
         "--install-from",
         str(source_root),
     ]

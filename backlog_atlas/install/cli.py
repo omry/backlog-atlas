@@ -29,6 +29,11 @@ def run_install(args: argparse.Namespace) -> int:
         )
     if args.delivery and not args.repo:
         raise UserError("--delivery only applies to remote installs with --repo")
+    if args.repo and not args.delivery:
+        raise UserError(
+            "--delivery is required for remote installs with --repo; "
+            "choose --delivery pr or --delivery push"
+        )
 
     verbose = bool(args.verbose or args.dry_run)
     with install_output_context(verbose):
@@ -41,7 +46,7 @@ def run_install(args: argparse.Namespace) -> int:
             return github.run_remote_install(
                 repo_name,
                 install_source,
-                args.delivery or "pr",
+                args.delivery,
                 dry_run=args.dry_run,
             )
 
@@ -176,7 +181,10 @@ def add_install_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--delivery",
         choices=["pr", "push"],
-        help="For remote installs, create an install PR or push to the default branch.",
+        help=(
+            "Required for remote installs: create an install PR or push to the "
+            "default branch."
+        ),
     )
     parser.add_argument(
         "--dry-run",

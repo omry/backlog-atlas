@@ -82,12 +82,13 @@ instead of a local checkout.
 
 ```sh
 gh auth login
-backlog-atlas install --repo https://github.com/owner/name --dry-run
-backlog-atlas install --repo https://github.com/owner/name
+backlog-atlas install --repo https://github.com/owner/name --delivery pr --dry-run
+backlog-atlas install --repo https://github.com/owner/name --delivery pr
 ```
 
-Remote installs use `gh`, require write access, and default to opening an
-install pull request. To commit directly to the default branch:
+Remote installs use `gh`, require write access, and require an explicit
+delivery mode. Use `--delivery pr` to open an install pull request, or commit
+directly to the default branch with:
 
 ```sh
 backlog-atlas install --repo https://github.com/owner/name --delivery push
@@ -371,8 +372,8 @@ backlog-atlas install
 For remote install:
 
 ```sh
-backlog-atlas install --repo https://github.com/owner/name --dry-run
-backlog-atlas install --repo https://github.com/owner/name
+backlog-atlas install --repo https://github.com/owner/name --delivery pr --dry-run
+backlog-atlas install --repo https://github.com/owner/name --delivery pr
 ```
 
 This updates the installed workflow and `.github/backlog-atlas/manifest.json` so
