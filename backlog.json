@@ -1,9 +1,9 @@
 {
   "generated_on": "2026-06-07",
-  "generated_at": "2026-06-07T09:54:35Z",
+  "generated_at": "2026-06-07T12:52:00Z",
   "repo": "omry/backlog-atlas",
   "summary": {
-    "open_total": 1,
+    "open_total": 2,
     "by_category": [
       {
         "category": "Bug",
@@ -14,7 +14,7 @@
       {
         "category": "Enhancement",
         "emoji": "✨",
-        "count": 1,
+        "count": 2,
         "percentage": 100.0
       },
       {
@@ -61,7 +61,7 @@
       {
         "status": "not started",
         "emoji": "⬜",
-        "count": 1
+        "count": 2
       },
       {
         "status": "done",
@@ -87,6 +87,19 @@
       "url": "https://github.com/omry/backlog-atlas/issues/2"
     },
     {
+      "number": 4,
+      "title": "Generated workflow fails writing backlog-atlas branch on external fork PR events",
+      "category": "Enhancement",
+      "category_emoji": "✨",
+      "status": "not started",
+      "status_emoji": "⬜",
+      "prs": [],
+      "created": "2026-06-07",
+      "updated": "2026-06-07",
+      "labels": [],
+      "url": "https://github.com/omry/backlog-atlas/issues/4"
+    },
+    {
       "number": 1,
       "title": "Dogfood Backlog Atlas install on this repo",
       "category": "Enhancement",
@@ -103,6 +116,13 @@
     }
   ],
   "updates": [
+    {
+      "ts": "2026-06-07T12:52:00Z",
+      "kind": "new",
+      "issue": 4,
+      "issue_url": "https://github.com/omry/backlog-atlas/issues/4",
+      "title": "Generated workflow fails writing backlog-atlas branch on external fork PR events"
+    },
     {
       "ts": "2026-05-18T09:01:08Z",
       "kind": "closed",

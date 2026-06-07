@@ -2,7 +2,7 @@
   "closed_at": {
     "1": "2026-05-18"
   },
-  "generated_at": "2026-06-07T09:54:35Z",
+  "generated_at": "2026-06-07T12:52:00Z",
   "issues": {
     "2": {
       "category": "Enhancement",
@@ -15,6 +15,16 @@
       "status": "not started",
       "title": "Explore reusable GitHub Actions package-manager lifecycle",
       "updated_at": "2026-05-17T07:11:58Z"
+    },
+    "4": {
+      "category": "Enhancement",
+      "created_at": "2026-06-07T12:50:38Z",
+      "labels": [],
+      "pr_numbers": [],
+      "state": "OPEN",
+      "status": "not started",
+      "title": "Generated workflow fails writing backlog-atlas branch on external fork PR events",
+      "updated_at": "2026-06-07T12:50:38Z"
     }
   },
   "recent_done": {
