@@ -1,9 +1,9 @@
 {
   "generated_on": "2026-06-27",
-  "generated_at": "2026-06-27T09:20:16Z",
+  "generated_at": "2026-06-27T15:36:21Z",
   "repo": "omry/backlog-atlas",
   "summary": {
-    "open_total": 2,
+    "open_total": 3,
     "by_category": [
       {
         "category": "Bug",
@@ -14,7 +14,7 @@
       {
         "category": "Enhancement",
         "emoji": "✨",
-        "count": 2,
+        "count": 3,
         "percentage": 100.0
       },
       {
@@ -61,7 +61,7 @@
       {
         "status": "not started",
         "emoji": "⬜",
-        "count": 2
+        "count": 3
       },
       {
         "status": "done",
@@ -100,6 +100,19 @@
       "url": "https://github.com/omry/backlog-atlas/issues/4"
     },
     {
+      "number": 5,
+      "title": "Handle Backlog Atlas updates for external fork PRs safely",
+      "category": "Enhancement",
+      "category_emoji": "✨",
+      "status": "not started",
+      "status_emoji": "⬜",
+      "prs": [],
+      "created": "2026-06-27",
+      "updated": "2026-06-27",
+      "labels": [],
+      "url": "https://github.com/omry/backlog-atlas/issues/5"
+    },
+    {
       "number": 1,
       "title": "Dogfood Backlog Atlas install on this repo",
       "category": "Enhancement",
@@ -116,6 +129,13 @@
     }
   ],
   "updates": [
+    {
+      "ts": "2026-06-27T15:36:21Z",
+      "kind": "new",
+      "issue": 5,
+      "issue_url": "https://github.com/omry/backlog-atlas/issues/5",
+      "title": "Handle Backlog Atlas updates for external fork PRs safely"
+    },
     {
       "ts": "2026-06-07T12:52:00Z",
       "kind": "new",

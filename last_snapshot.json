@@ -2,7 +2,7 @@
   "closed_at": {
     "1": "2026-05-18"
   },
-  "generated_at": "2026-06-27T09:20:16Z",
+  "generated_at": "2026-06-27T15:36:21Z",
   "issues": {
     "2": {
       "category": "Enhancement",
@@ -25,6 +25,16 @@
       "status": "not started",
       "title": "Generated workflow fails writing backlog-atlas branch on external fork PR events",
       "updated_at": "2026-06-07T12:50:38Z"
+    },
+    "5": {
+      "category": "Enhancement",
+      "created_at": "2026-06-27T15:35:02Z",
+      "labels": [],
+      "pr_numbers": [],
+      "state": "OPEN",
+      "status": "not started",
+      "title": "Handle Backlog Atlas updates for external fork PRs safely",
+      "updated_at": "2026-06-27T15:35:02Z"
     }
   },
   "recent_done": {
