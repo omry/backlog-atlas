@@ -6,6 +6,8 @@ on:
     types: [opened, closed, labeled, unlabeled, reopened]
   pull_request:
     types: [opened, closed, labeled, unlabeled, reopened]
+  pull_request_target:
+    types: [closed]
   schedule:
     - cron: '0 7 * * *'  # daily fallback
   workflow_dispatch:
@@ -21,6 +23,12 @@ env:
 
 jobs:
   ensure-backlog-branch:
+    if: >-
+      (github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository) &&
+      (github.event_name != 'pull_request_target' ||
+      (github.event.pull_request.merged == true &&
+      github.event.pull_request.head.repo.full_name != github.repository))
     runs-on: ubuntu-latest
     steps:
       - name: Ensure Backlog Atlas branch exists
@@ -49,8 +57,20 @@ jobs:
 
   process:
     needs: ensure-backlog-branch
+    if: >-
+      (github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository) &&
+      (github.event_name != 'pull_request_target' ||
+      (github.event.pull_request.merged == true &&
+      github.event.pull_request.head.repo.full_name != github.repository))
     concurrency:
-      group: update-backlog-atlas
+      group: >-
+        ${{ ((github.event_name != 'pull_request' ||
+        github.event.pull_request.head.repo.full_name == github.repository) &&
+        (github.event_name != 'pull_request_target' ||
+        (github.event.pull_request.merged == true &&
+        github.event.pull_request.head.repo.full_name != github.repository))) &&
+        'update-backlog-atlas-writable' || 'update-backlog-atlas-unwritable' }}
       cancel-in-progress: true
     runs-on: ubuntu-latest
     steps:

@@ -125,6 +125,22 @@ The generated branch contains:
 
 The branch is intentionally machine-owned. It is not meant for hand editing.
 
+Issue events and pull requests from branches in the same repository update the
+generated branch promptly. Pull request events from external forks skip all
+write-capable jobs because GitHub gives those runs a read-only token by default.
+An open external pull request catches up during the daily scheduled run. After
+an external pull request merges, a narrowly scoped `pull_request_target.closed`
+run catches up immediately. That privileged event runs the workflow from the
+base repository's default branch, accepts only merged external pull requests,
+and checks out only the base default branch and machine-owned `backlog-atlas`
+branch. It never checks out the fork repository or ref, and it never downloads
+or executes fork artifacts. Do not customize this path to run fork content.
+
+The generated workflow does not require normal fork pull request runs to
+receive write tokens or secrets; keep repository and organization settings that
+would send those credentials to fork workflows disabled. Ineligible fork runs
+use a separate concurrency group, so they cannot cancel a write-capable update.
+
 The workflow reads `.github/backlog-atlas/config.yaml` from the default branch.
 Edit that file in the repository checkout to customize classification labels,
 title keywords, and retention settings.
