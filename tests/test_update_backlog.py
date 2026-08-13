@@ -860,6 +860,51 @@ def _make_backlog_atlas_checkout(tmp_path: Path) -> Path:
     return source_root
 
 
+_WORKFLOW_WRITE_GUARD = """if: >-
+      (github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository) &&
+      (github.event_name != 'pull_request_target' ||
+      (github.event.pull_request.merged == true &&
+      github.event.pull_request.head.repo.full_name != github.repository))"""
+
+
+def _workflow_job_block(workflow: str, job: str, next_job: str | None = None) -> str:
+    block = workflow.split(f"  {job}:\n", 1)[1]
+    if next_job is not None:
+        block = block.split(f"  {next_job}:\n", 1)[0]
+    return block
+
+
+def _workflow_write_eligible(
+    event_name: str,
+    *,
+    repository: str = "owner/repo",
+    head_repository: str | None = None,
+    merged: bool = False,
+) -> bool:
+    same_repository_pr = event_name != "pull_request" or head_repository == repository
+    merged_external_target = event_name != "pull_request_target" or (
+        merged and head_repository != repository
+    )
+    return same_repository_pr and merged_external_target
+
+
+def _assert_workflow_has_safe_fork_policy(workflow: str) -> None:
+    event_types = "    types: [opened, closed, labeled, unlabeled, reopened]\n"
+    assert f"  issues:\n{event_types}" in workflow
+    assert f"  pull_request:\n{event_types}" in workflow
+    assert "  pull_request_target:\n    types: [closed]\n" in workflow
+    assert "  push:\n" not in workflow
+    assert "  schedule:\n    - cron: '0 7 * * *'  # daily fallback\n" in workflow
+
+    ensure_job = _workflow_job_block(workflow, "ensure-backlog-branch", "process")
+    process_job = _workflow_job_block(workflow, "process")
+    assert _WORKFLOW_WRITE_GUARD in ensure_job
+    assert _WORKFLOW_WRITE_GUARD in process_job
+    assert "update-backlog-atlas-writable" in process_job
+    assert "update-backlog-atlas-unwritable" in process_job
+
+
 def test_workflow_template_substitutes_install_source():
     out = install_artifacts.load_workflow_template("git+https://example.com/x.git")
     assert "__BACKLOG_ATLAS_PIP__" not in out
@@ -895,6 +940,80 @@ def test_workflow_template_substitutes_install_source():
     # GitHub Actions ${{ }} expressions must be preserved verbatim.
     assert "${{ github.event_name }}" in out
     assert "${{ github.event.action }}" in out
+
+
+def test_workflow_template_renders_trusted_catch_up_triggers_and_job_guards():
+    out = install_artifacts.load_workflow_template("backlog-atlas==1.2.3")
+
+    _assert_workflow_has_safe_fork_policy(out)
+
+
+@pytest.mark.parametrize(
+    ("event_name", "head_repository", "merged", "expected"),
+    [
+        ("issues", None, False, True),
+        ("pull_request", "owner/repo", False, True),
+        ("pull_request", "contributor/repo", False, False),
+        ("pull_request_target", "contributor/repo", True, True),
+        ("pull_request_target", "contributor/repo", False, False),
+        ("pull_request_target", "owner/repo", True, False),
+        ("schedule", None, False, True),
+        ("workflow_dispatch", None, False, True),
+    ],
+)
+def test_workflow_write_guard_eligibility(
+    event_name: str,
+    head_repository: str | None,
+    merged: bool,
+    expected: bool,
+):
+    assert (
+        _workflow_write_eligible(
+            event_name,
+            head_repository=head_repository,
+            merged=merged,
+        )
+        is expected
+    )
+
+
+def test_workflow_concurrency_isolates_unwritable_events():
+    out = install_artifacts.load_workflow_template("backlog-atlas==1.2.3")
+    process_job = _workflow_job_block(out, "process")
+    concurrency = process_job.split("    concurrency:\n", 1)[1].split(
+        "    runs-on:\n", 1
+    )[0]
+
+    assert "concurrency:" not in out.split("jobs:\n", 1)[0]
+    assert "concurrency:" in process_job
+    for expected in (
+        "github.event_name != 'pull_request'",
+        "github.event.pull_request.head.repo.full_name == github.repository",
+        "github.event_name != 'pull_request_target'",
+        "github.event.pull_request.merged == true",
+        "github.event.pull_request.head.repo.full_name != github.repository",
+        "update-backlog-atlas-writable",
+        "update-backlog-atlas-unwritable",
+        "cancel-in-progress: true",
+    ):
+        assert expected in concurrency
+
+
+def test_workflow_privileged_catch_up_never_uses_fork_content():
+    out = install_artifacts.load_workflow_template("backlog-atlas==1.2.3")
+    process_job = _workflow_job_block(out, "process")
+
+    assert "ref: ${{ github.event.repository.default_branch }}" in process_job
+    assert "ref: ${{ env.BACKLOG_ATLAS_BRANCH }}" in process_job
+    assert "repository:" not in process_job
+    for forbidden in (
+        "github.event.pull_request.head.sha",
+        "github.event.pull_request.head.ref",
+        "refs/pull/",
+        "gh pr checkout",
+        "actions/download-artifact",
+    ):
+        assert forbidden not in out
 
 
 def test_web_ui_supports_browser_federated_manifest():
@@ -1717,6 +1836,7 @@ def test_install_writes_workflow_when_missing(
     content = wf.read_text(encoding="utf-8")
     assert "BACKLOG_ATLAS_PIP: backlog-atlas==2.0.0" in content
     assert "${{ github.event_name }}" in content
+    _assert_workflow_has_safe_fork_policy(content)
     manifest_obj = json.loads(manifest.read_text(encoding="utf-8"))
     assert manifest_obj["tool"] == "backlog-atlas"
     assert manifest_obj["install"] == {
@@ -2178,7 +2298,9 @@ def test_install_updates_managed_existing_workflow_and_manifest(
     ]
     rc = ub.main()
     assert rc == 0
-    assert "ref: main" not in wf.read_text(encoding="utf-8")
+    upgraded_workflow = wf.read_text(encoding="utf-8")
+    assert "ref: main" not in upgraded_workflow
+    _assert_workflow_has_safe_fork_policy(upgraded_workflow)
     assert manifest.exists()
     assert config.exists()
     assert calls == [
@@ -3621,6 +3743,7 @@ def test_install_remote_pr_writes_workflow_and_manifest(
     workflow = changes[".github/workflows/update-backlog-atlas.yml"].decode()
     assert "ref: ${{ github.event.repository.default_branch }}" in workflow
     assert "ref: main" not in workflow
+    _assert_workflow_has_safe_fork_policy(workflow)
     assert commit_call[4] == "backlog: install Backlog Atlas 1.2.3 workflow"
     assert calls[-1][:4] == (
         "pr",
