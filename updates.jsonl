@@ -6,3 +6,5 @@
 {"ts": "2026-08-12T19:39:55Z", "kind": "status", "issue": 5, "issue_url": "https://github.com/omry/backlog-atlas/issues/5", "title": "Handle Backlog Atlas updates for external fork PRs safely", "detail": "not started → in progress", "pr": {"number": 6, "url": "https://github.com/omry/backlog-atlas/pull/6"}}
 {"ts": "2026-08-12T19:39:55Z", "kind": "pr", "issue": 4, "issue_url": "https://github.com/omry/backlog-atlas/issues/4", "title": "Generated workflow fails writing backlog-atlas branch on external fork PR events", "detail": "linked #6"}
 {"ts": "2026-08-12T19:39:55Z", "kind": "pr", "issue": 5, "issue_url": "https://github.com/omry/backlog-atlas/issues/5", "title": "Handle Backlog Atlas updates for external fork PRs safely", "detail": "linked #6"}
+{"ts": "2026-08-13T05:42:18Z", "kind": "closed", "issue": 4, "issue_url": "https://github.com/omry/backlog-atlas/issues/4", "title": "Generated workflow fails writing backlog-atlas branch on external fork PR events"}
+{"ts": "2026-08-13T05:42:18Z", "kind": "closed", "issue": 5, "issue_url": "https://github.com/omry/backlog-atlas/issues/5", "title": "Handle Backlog Atlas updates for external fork PRs safely"}

@@ -1,9 +1,9 @@
 {
-  "generated_on": "2026-08-12",
-  "generated_at": "2026-08-12T19:39:55Z",
+  "generated_on": "2026-08-13",
+  "generated_at": "2026-08-13T05:42:18Z",
   "repo": "omry/backlog-atlas",
   "summary": {
-    "open_total": 3,
+    "open_total": 1,
     "by_category": [
       {
         "category": "Bug",
@@ -14,7 +14,7 @@
       {
         "category": "Enhancement",
         "emoji": "✨",
-        "count": 3,
+        "count": 1,
         "percentage": 100.0
       },
       {
@@ -46,7 +46,7 @@
       {
         "status": "in progress",
         "emoji": "🔄",
-        "count": 2
+        "count": 0
       },
       {
         "status": "community PR",
@@ -66,47 +66,11 @@
       {
         "status": "done",
         "emoji": "✅",
-        "count": 1
+        "count": 3
       }
     ]
   },
   "issues": [
-    {
-      "number": 4,
-      "title": "Generated workflow fails writing backlog-atlas branch on external fork PR events",
-      "category": "Enhancement",
-      "category_emoji": "✨",
-      "status": "in progress",
-      "status_emoji": "🔄",
-      "prs": [
-        {
-          "number": 6,
-          "url": "https://github.com/omry/backlog-atlas/pull/6"
-        }
-      ],
-      "created": "2026-06-07",
-      "updated": "2026-06-07",
-      "labels": [],
-      "url": "https://github.com/omry/backlog-atlas/issues/4"
-    },
-    {
-      "number": 5,
-      "title": "Handle Backlog Atlas updates for external fork PRs safely",
-      "category": "Enhancement",
-      "category_emoji": "✨",
-      "status": "in progress",
-      "status_emoji": "🔄",
-      "prs": [
-        {
-          "number": 6,
-          "url": "https://github.com/omry/backlog-atlas/pull/6"
-        }
-      ],
-      "created": "2026-06-27",
-      "updated": "2026-06-27",
-      "labels": [],
-      "url": "https://github.com/omry/backlog-atlas/issues/5"
-    },
     {
       "number": 2,
       "title": "Explore reusable GitHub Actions package-manager lifecycle",
@@ -136,9 +100,59 @@
         "enhancement"
       ],
       "url": "https://github.com/omry/backlog-atlas/issues/1"
+    },
+    {
+      "number": 4,
+      "title": "Generated workflow fails writing backlog-atlas branch on external fork PR events",
+      "category": "Enhancement",
+      "category_emoji": "✨",
+      "status": "done",
+      "status_emoji": "✅",
+      "prs": [
+        {
+          "number": 6,
+          "url": "https://github.com/omry/backlog-atlas/pull/6"
+        }
+      ],
+      "created": "2026-06-07",
+      "updated": "2026-06-07",
+      "labels": [],
+      "url": "https://github.com/omry/backlog-atlas/issues/4"
+    },
+    {
+      "number": 5,
+      "title": "Handle Backlog Atlas updates for external fork PRs safely",
+      "category": "Enhancement",
+      "category_emoji": "✨",
+      "status": "done",
+      "status_emoji": "✅",
+      "prs": [
+        {
+          "number": 6,
+          "url": "https://github.com/omry/backlog-atlas/pull/6"
+        }
+      ],
+      "created": "2026-06-27",
+      "updated": "2026-06-27",
+      "labels": [],
+      "url": "https://github.com/omry/backlog-atlas/issues/5"
     }
   ],
   "updates": [
+    {
+      "ts": "2026-08-13T05:42:18Z",
+      "kind": "closed",
+      "issue": 5,
+      "issue_url": "https://github.com/omry/backlog-atlas/issues/5",
+      "title": "Handle Backlog Atlas updates for external fork PRs safely"
+    },
+    {
+      "ts": "2026-08-13T05:42:18Z",
+      "kind": "closed",
+      "issue": 4,
+      "issue_url": "https://github.com/omry/backlog-atlas/issues/4",
+      "title": "Generated workflow fails writing backlog-atlas branch on external fork PR events"
+    },
     {
       "ts": "2026-08-12T19:39:55Z",
       "kind": "pr",
