@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
+import textwrap
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -940,6 +942,50 @@ def test_workflow_template_substitutes_install_source():
     # GitHub Actions ${{ }} expressions must be preserved verbatim.
     assert "${{ github.event_name }}" in out
     assert "${{ github.event.action }}" in out
+
+
+def test_workflow_commit_handles_missing_internal_directory(tmp_path: Path):
+    workflow = install_artifacts.load_workflow_template("backlog-atlas==1.2.3")
+    marker = "      - name: Commit to Backlog Atlas branch\n        run: |\n"
+    commit_script = textwrap.dedent(workflow.split(marker, 1)[1])
+    branch = tmp_path / "backlog-atlas-branch"
+    branch.mkdir()
+
+    subprocess.run(["git", "init"], cwd=branch, check=True, capture_output=True)
+    for path in (
+        "last_snapshot.json",
+        "backlog.json",
+        "updates.jsonl",
+        "index.html",
+        "favicon.svg",
+        "badge.svg",
+    ):
+        (branch / path).write_text(f"{path}\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=branch, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "-m",
+            "initial backlog",
+        ],
+        cwd=branch,
+        check=True,
+        capture_output=True,
+    )
+
+    result = subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c", commit_script],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_workflow_template_renders_trusted_catch_up_triggers_and_job_guards():
