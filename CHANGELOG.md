@@ -5,6 +5,10 @@ Keep entries user-facing and grouped by released version.
 
 ## Unreleased
 
+- Nothing yet.
+
+## 0.18
+
 - Prevented generated workflows from attempting writes for external-fork pull
   request events, with narrowly scoped trusted catch-up after external pull
   requests merge and the existing daily schedule as fallback while they remain
