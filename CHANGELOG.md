@@ -5,6 +5,10 @@ Keep entries user-facing and grouped by released version.
 
 ## Unreleased
 
+- Nothing yet.
+
+## 0.19
+
 - Fixed generated updates after bundled-package cleanup when the retained
   Backlog Atlas branch no longer contains a `.backlog-atlas` directory.
 
